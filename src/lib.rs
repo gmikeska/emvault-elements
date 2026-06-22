@@ -26,6 +26,8 @@ pub mod confidential;
 pub mod descriptor;
 /// Error types for PSET signing and descriptor construction.
 pub mod error;
+/// [`ElementsFederatedWallet`] — Elements implementation of the federated wallet.
+pub mod federated_wallet;
 /// Elements/Liquid network types.
 pub mod network;
 /// PSET pipeline: blinding, signing coordination, finalization.
@@ -35,6 +37,7 @@ pub mod signer;
 
 pub use descriptor::{CtDescriptorBuilder, CtKeyMode};
 pub use error::{CtDescriptorError, PsetError};
+pub use federated_wallet::{ElementsFederatedWallet, ElementsWalletHandle};
 pub use confidential::validate_blinding;
 pub use pset::{
     BlindedPset, ElementsSigningCoordinator, FinalizedPset, UnsignedPset, blind_pset,

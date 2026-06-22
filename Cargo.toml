@@ -11,3 +11,6 @@ bitcoin = "0.32.10"
 elements = { version = "0.25", features = ["serde"] }
 elements-miniscript = { version = "0.4", features = ["serde"] }
 thiserror = "2.0.18"
+
+[dev-dependencies]
+asterism-core = { version = "0.1.0", path = "../asterism-core", features = ["elements", "test-utils"] }
