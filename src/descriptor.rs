@@ -183,13 +183,13 @@ pub fn to_multipath_string(desc: &ConfidentialDescriptor<DescriptorPublicKey>) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bitcoin::bip32::Xpub;
     use bitcoin::Network;
+    use bitcoin::bip32::Xpub;
 
+    use asterism_core::network::NetworkType;
     use asterism_core::signer::{
         SignerCapabilities, SignerHealth, SignerId, SignerType, TransportType,
     };
-    use asterism_core::network::NetworkType;
 
     #[derive(Clone)]
     struct FakeSigner {
@@ -222,12 +222,24 @@ mod tests {
     }
 
     impl Signer for FakeSigner {
-        fn id(&self) -> SignerId { self.id.clone() }
-        fn label(&self) -> Option<&str> { None }
-        fn xpub(&self) -> &Xpub { &self.xpub }
-        fn fingerprint(&self) -> Fingerprint { self.fingerprint }
-        fn derivation_path(&self) -> &DerivationPath { &self.path }
-        fn signer_type(&self) -> SignerType { SignerType::External }
+        fn id(&self) -> SignerId {
+            self.id.clone()
+        }
+        fn label(&self) -> Option<&str> {
+            None
+        }
+        fn xpub(&self) -> &Xpub {
+            &self.xpub
+        }
+        fn fingerprint(&self) -> Fingerprint {
+            self.fingerprint
+        }
+        fn derivation_path(&self) -> &DerivationPath {
+            &self.path
+        }
+        fn signer_type(&self) -> SignerType {
+            SignerType::External
+        }
         fn supported_networks(&self) -> Vec<NetworkType> {
             vec![NetworkType::Bitcoin(Network::Testnet)]
         }
@@ -259,19 +271,26 @@ mod tests {
     #[test]
     fn build_ct_descriptor_ranged_mode() {
         let mbk = [0xcd; 32];
-        let mut builder = CtDescriptorBuilder::new(2, &mbk).unwrap().key_mode(CtKeyMode::Ranged);
+        let mut builder = CtDescriptorBuilder::new(2, &mbk)
+            .unwrap()
+            .key_mode(CtKeyMode::Ranged);
         for seed in 1..=3u8 {
             builder.add_signer(&FakeSigner::new(seed)).unwrap();
         }
         let desc = builder.build().unwrap();
         let s = desc.to_string();
-        assert!(s.contains("/0/*"), "ranged mode should have wildcard, got: {s}");
+        assert!(
+            s.contains("/0/*"),
+            "ranged mode should have wildcard, got: {s}"
+        );
     }
 
     #[test]
     fn multipath_string_replaces_wildcard() {
         let mbk = [0xef; 32];
-        let mut builder = CtDescriptorBuilder::new(2, &mbk).unwrap().key_mode(CtKeyMode::Ranged);
+        let mut builder = CtDescriptorBuilder::new(2, &mbk)
+            .unwrap()
+            .key_mode(CtKeyMode::Ranged);
         for seed in 1..=3u8 {
             builder.add_signer(&FakeSigner::new(seed)).unwrap();
         }
@@ -308,7 +327,9 @@ mod tests {
     #[test]
     fn at_derivation_index_works() {
         let mbk = [0xab; 32];
-        let mut builder = CtDescriptorBuilder::new(2, &mbk).unwrap().key_mode(CtKeyMode::Ranged);
+        let mut builder = CtDescriptorBuilder::new(2, &mbk)
+            .unwrap()
+            .key_mode(CtKeyMode::Ranged);
         for seed in 1..=3u8 {
             builder.add_signer(&FakeSigner::new(seed)).unwrap();
         }
