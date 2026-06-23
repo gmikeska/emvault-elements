@@ -231,12 +231,15 @@ pub fn derive_input_secrets(
             .as_ref()
             .ok_or_else(|| PsetError::Elements(format!("input {i} missing witness_utxo")))?;
 
-        let txout_secrets = if let (confidential::Value::Explicit(value), confidential::Asset::Explicit(asset)) = (utxo.value, utxo.asset) {
-            explicit_txout_secrets(asset, value)
-        } else {
-            let blinding_key = slip77_blinding_key(master_blinding_key, &utxo.script_pubkey);
-            unblind_input(utxo, blinding_key)?
-        };
+        let txout_secrets =
+            if let (confidential::Value::Explicit(value), confidential::Asset::Explicit(asset)) =
+                (utxo.value, utxo.asset)
+            {
+                explicit_txout_secrets(asset, value)
+            } else {
+                let blinding_key = slip77_blinding_key(master_blinding_key, &utxo.script_pubkey);
+                unblind_input(utxo, blinding_key)?
+            };
         secrets.insert(i, txout_secrets);
     }
     Ok(secrets)

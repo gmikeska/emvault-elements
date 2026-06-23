@@ -224,7 +224,12 @@ impl<S: Signer> FederatedWallet<S, ElementsWalletHandle> for ElementsFederatedWa
     fn all_signer_ids(&self) -> HashSet<SignerId> {
         self.federation_wallets
             .iter()
-            .flat_map(|fw| fw.federation.signers().iter().map(asterism_core::Signer::id))
+            .flat_map(|fw| {
+                fw.federation
+                    .signers()
+                    .iter()
+                    .map(asterism_core::Signer::id)
+            })
             .collect()
     }
 
