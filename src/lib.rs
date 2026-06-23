@@ -35,16 +35,16 @@ pub mod pset;
 /// The [`ElementsSigner`] trait for PSET signing.
 pub mod signer;
 
+pub use confidential::validate_blinding;
 pub use descriptor::{CtDescriptorBuilder, CtKeyMode};
 pub use error::{CtDescriptorError, PsetError};
 pub use federated_wallet::{ElementsFederatedWallet, ElementsWalletHandle};
-pub use confidential::validate_blinding;
+pub use network::ElementsNetwork;
 pub use pset::{
     BlindedPset, ElementsSigningCoordinator, FinalizedPset, UnsignedPset, blind_pset,
     derive_input_secrets, explicit_txout_secrets, finalize_p2wsh_pset, slip77_blinding_key,
     unblind_input,
 };
-pub use network::ElementsNetwork;
 pub use signer::ElementsSigner;
 
 /// Re-export of [`elements_miniscript`] for downstream crates that need

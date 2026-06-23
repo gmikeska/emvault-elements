@@ -240,11 +240,9 @@ mod tests {
     use super::*;
     use asterism_core::federation::Federation;
     use asterism_core::network::ElementsNetworkId;
-    use asterism_core::signer::{
-        SignerCapabilities, SignerHealth, SignerType, TransportType,
-    };
-    use bitcoin::bip32::{DerivationPath, Fingerprint, Xpub};
+    use asterism_core::signer::{SignerCapabilities, SignerHealth, SignerType, TransportType};
     use bitcoin::Network;
+    use bitcoin::bip32::{DerivationPath, Fingerprint, Xpub};
     use std::str::FromStr;
 
     #[derive(Clone)]
@@ -321,7 +319,11 @@ mod tests {
         .unwrap()
     }
 
-    fn make_handle(name: &str, fed: &Federation<FakeSigner>, blinding_key: [u8; 32]) -> ElementsWalletHandle {
+    fn make_handle(
+        name: &str,
+        fed: &Federation<FakeSigner>,
+        blinding_key: [u8; 32],
+    ) -> ElementsWalletHandle {
         use crate::descriptor::CtDescriptorBuilder;
         let mut builder = CtDescriptorBuilder::new(fed.threshold(), &blinding_key).unwrap();
         for signer in fed.signers() {
@@ -335,7 +337,8 @@ mod tests {
     fn construct_with_initial_federation() {
         let fed = make_federation(&[1, 2, 3], 2);
         let handle = make_handle("test-wallet-0", &fed, [0xaa; 32]);
-        let fw = ElementsFederatedWallet::new(fed, handle, ElementsNetwork::ElementsRegtest).unwrap();
+        let fw =
+            ElementsFederatedWallet::new(fed, handle, ElementsNetwork::ElementsRegtest).unwrap();
         assert_eq!(fw.federation_count(), 1);
         assert_eq!(fw.current().index, 0);
         assert_eq!(fw.threshold(), 2);
@@ -396,7 +399,10 @@ mod tests {
         let h2 = make_handle("wallet-v2", &fed2, [0xbb; 32]);
         let fw = fw.with_federation(fed2, h2).unwrap();
 
-        let names: Vec<&str> = fw.wallet_handles().map(|h| h.wallet_name.as_str()).collect();
+        let names: Vec<&str> = fw
+            .wallet_handles()
+            .map(|h| h.wallet_name.as_str())
+            .collect();
         assert_eq!(names, vec!["wallet-v1", "wallet-v2"]);
     }
 
@@ -500,7 +506,8 @@ mod tests {
             },
             [0xaa; 32],
         );
-        let err = ElementsFederatedWallet::new(fed, handle, ElementsNetwork::ElementsRegtest).unwrap_err();
+        let err = ElementsFederatedWallet::new(fed, handle, ElementsNetwork::ElementsRegtest)
+            .unwrap_err();
         assert!(matches!(err, FederatedWalletError::NonElementsNetwork));
     }
 }

@@ -214,9 +214,10 @@ pub fn derive_input_secrets(
 ) -> Result<HashMap<usize, TxOutSecrets>, PsetError> {
     let mut secrets = HashMap::new();
     for (i, input) in pset.inputs().iter().enumerate() {
-        let utxo = input.witness_utxo.as_ref().ok_or_else(|| {
-            PsetError::Elements(format!("input {i} missing witness_utxo"))
-        })?;
+        let utxo = input
+            .witness_utxo
+            .as_ref()
+            .ok_or_else(|| PsetError::Elements(format!("input {i} missing witness_utxo")))?;
 
         let txout_secrets = match (utxo.value, utxo.asset) {
             (confidential::Value::Explicit(value), confidential::Asset::Explicit(asset)) => {
@@ -321,10 +322,7 @@ impl<'a, S: Signer> ElementsSigningCoordinator<'a, S> {
                         .bip32_derivation
                         .iter()
                         .any(|(k, (f, _))| *f == fp && k == *pk);
-                    fp_matches
-                        && !self.pset.inputs()[input_idx]
-                            .partial_sigs
-                            .contains_key(*pk)
+                    fp_matches && !self.pset.inputs()[input_idx].partial_sigs.contains_key(*pk)
                 })
                 .map(|(pk, sig)| (*pk, sig.clone()))
                 .collect();
