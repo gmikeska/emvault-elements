@@ -152,11 +152,13 @@ impl<S: Signer> ElementsFederatedWallet<S> {
     }
 
     /// The Elements network this wallet operates on.
+    #[must_use]
     pub fn elements_network(&self) -> ElementsNetwork {
         self.network
     }
 
     /// All confidential descriptors across the wallet stack.
+    #[must_use]
     pub fn ct_descriptors(&self) -> Vec<&ConfidentialDescriptor<DescriptorPublicKey>> {
         self.federation_wallets
             .iter()
@@ -171,6 +173,7 @@ impl<S: Signer> ElementsFederatedWallet<S> {
     }
 
     /// Direct access to a wallet handle by federation index.
+    #[must_use]
     pub fn handle_at(&self, index: usize) -> Option<&ElementsWalletHandle> {
         self.federation_wallets.get(index).map(|fw| &fw.wallet)
     }
@@ -221,7 +224,7 @@ impl<S: Signer> FederatedWallet<S, ElementsWalletHandle> for ElementsFederatedWa
     fn all_signer_ids(&self) -> HashSet<SignerId> {
         self.federation_wallets
             .iter()
-            .flat_map(|fw| fw.federation.signers().iter().map(|s| s.id()))
+            .flat_map(|fw| fw.federation.signers().iter().map(asterism_core::Signer::id))
             .collect()
     }
 
@@ -230,7 +233,7 @@ impl<S: Signer> FederatedWallet<S, ElementsWalletHandle> for ElementsFederatedWa
             .federation
             .signers()
             .iter()
-            .map(|s| s.id())
+            .map(asterism_core::Signer::id)
             .collect()
     }
 }

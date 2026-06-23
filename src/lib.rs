@@ -19,6 +19,7 @@
 
 #![warn(missing_docs)]
 #![forbid(unsafe_code)]
+#![allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
 
 /// Defense-in-depth validation for blinded PSETs.
 pub mod confidential;

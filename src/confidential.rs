@@ -43,12 +43,12 @@ pub(crate) fn validate_blinding_raw(pset: &Pset) -> Result<(), PsetError> {
             )));
         }
 
-        if let Some(blinder_idx) = output.blinder_index {
-            if (blinder_idx as usize) >= num_inputs {
-                return Err(PsetError::BlindingFailed(format!(
-                    "output {idx} blinder_index {blinder_idx} exceeds input count {num_inputs}"
-                )));
-            }
+        if let Some(blinder_idx) = output.blinder_index
+            && (blinder_idx as usize) >= num_inputs
+        {
+            return Err(PsetError::BlindingFailed(format!(
+                "output {idx} blinder_index {blinder_idx} exceeds input count {num_inputs}"
+            )));
         }
     }
 

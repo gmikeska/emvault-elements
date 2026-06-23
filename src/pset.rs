@@ -52,11 +52,13 @@ impl UnsignedPset {
     }
 
     /// Borrow the inner PSET.
+    #[must_use]
     pub fn as_pset(&self) -> &Pset {
         &self.0
     }
 
     /// Take ownership of the inner PSET.
+    #[must_use]
     pub fn into_pset(self) -> Pset {
         self.0
     }
@@ -79,11 +81,13 @@ impl BlindedPset {
     }
 
     /// Borrow the inner PSET.
+    #[must_use]
     pub fn as_pset(&self) -> &Pset {
         &self.0
     }
 
     /// Take ownership of the inner PSET.
+    #[must_use]
     pub fn into_pset(self) -> Pset {
         self.0
     }
@@ -98,21 +102,25 @@ pub struct FinalizedPset {
 
 impl FinalizedPset {
     /// The fully-signed transaction.
+    #[must_use]
     pub fn transaction(&self) -> &elements::Transaction {
         &self.transaction
     }
 
     /// The transaction id.
+    #[must_use]
     pub fn txid(&self) -> elements::Txid {
         self.transaction.txid()
     }
 
     /// The consensus-serialized transaction bytes.
+    #[must_use]
     pub fn serialize(&self) -> Vec<u8> {
         consensus_serialize(&self.transaction)
     }
 
     /// The consensus-serialized transaction as hex.
+    #[must_use]
     pub fn serialize_hex(&self) -> String {
         let bytes = self.serialize();
         let mut hex = String::with_capacity(bytes.len() * 2);
@@ -124,6 +132,7 @@ impl FinalizedPset {
     }
 
     /// The original PSET (retained for audit).
+    #[must_use]
     pub fn as_pset(&self) -> &Pset {
         &self.pset
     }
@@ -155,6 +164,7 @@ impl FinalizedPset {
 ///   (explicit values), pass the explicit secrets. For confidential
 ///   inputs, the caller must unblind them first (using the SLIP-77
 ///   derived key for that input's script).
+#[allow(clippy::implicit_hasher)]
 pub fn blind_pset(
     pset: UnsignedPset,
     inp_txout_secrets: &HashMap<usize, TxOutSecrets>,
@@ -173,6 +183,7 @@ pub fn blind_pset(
 /// Build [`TxOutSecrets`] for an input whose witness UTXO has explicit
 /// (unblinded) asset and value. This is common on regtest where
 /// coinbase outputs and non-CT transactions produce unblinded UTXOs.
+#[must_use]
 pub fn explicit_txout_secrets(asset: elements::AssetId, value: u64) -> TxOutSecrets {
     TxOutSecrets::new(
         asset,
@@ -195,6 +206,7 @@ pub fn unblind_input(
 }
 
 /// Derive the SLIP-77 blinding private key for a given script pubkey.
+#[must_use]
 pub fn slip77_blinding_key(
     master_blinding_key: &elements_miniscript::slip77::MasterBlindingKey,
     script_pubkey: &Script,
@@ -219,14 +231,11 @@ pub fn derive_input_secrets(
             .as_ref()
             .ok_or_else(|| PsetError::Elements(format!("input {i} missing witness_utxo")))?;
 
-        let txout_secrets = match (utxo.value, utxo.asset) {
-            (confidential::Value::Explicit(value), confidential::Asset::Explicit(asset)) => {
-                explicit_txout_secrets(asset, value)
-            }
-            _ => {
-                let blinding_key = slip77_blinding_key(master_blinding_key, &utxo.script_pubkey);
-                unblind_input(utxo, blinding_key)?
-            }
+        let txout_secrets = if let (confidential::Value::Explicit(value), confidential::Asset::Explicit(asset)) = (utxo.value, utxo.asset) {
+            explicit_txout_secrets(asset, value)
+        } else {
+            let blinding_key = slip77_blinding_key(master_blinding_key, &utxo.script_pubkey);
+            unblind_input(utxo, blinding_key)?
         };
         secrets.insert(i, txout_secrets);
     }
@@ -260,16 +269,19 @@ impl<'a, S: Signer> ElementsSigningCoordinator<'a, S> {
     }
 
     /// Borrow the current PSET.
+    #[must_use]
     pub fn pset(&self) -> &Pset {
         &self.pset
     }
 
     /// How many distinct signers have contributed signatures so far.
+    #[must_use]
     pub fn signatures_collected(&self) -> usize {
         self.signed.len()
     }
 
     /// Whether the signing threshold has been met.
+    #[must_use]
     pub fn is_complete(&self) -> bool {
         let collected =
             u32::try_from(self.signatures_collected()).expect("signature count fits u32");
@@ -300,7 +312,7 @@ impl<'a, S: Signer> ElementsSigningCoordinator<'a, S> {
     pub fn receive_signature(
         &mut self,
         signer_id: &SignerId,
-        signed_pset: Pset,
+        signed_pset: &Pset,
     ) -> Result<(), PsetError> {
         if !self.federation.contains(signer_id) {
             return Err(PsetError::UnknownSigner(signer_id.clone()));
@@ -347,8 +359,8 @@ impl<'a, S: Signer> ElementsSigningCoordinator<'a, S> {
 
     /// Finalize the PSET once the threshold has been met.
     ///
-    /// Assembles P2WSH witness stacks (OP_0 + sorted DER sigs +
-    /// witness_script) for each input and extracts the broadcast-ready
+    /// Assembles P2WSH witness stacks (`OP_0` + sorted DER sigs +
+    /// `witness_script`) for each input and extracts the broadcast-ready
     /// transaction.
     pub fn finalize(mut self) -> Result<FinalizedPset, PsetError> {
         if !self.is_complete() {
@@ -432,12 +444,11 @@ pub fn finalize_p2wsh_pset(pset: &mut Pset) -> Result<(), PsetError> {
 fn extract_pubkeys_from_witness_script(script: &Script) -> Vec<bitcoin::PublicKey> {
     let mut pubkeys = Vec::new();
     for instruction in script.instructions() {
-        if let Ok(elements::script::Instruction::PushBytes(data)) = instruction {
-            if data.len() == 33 {
-                if let Ok(pk) = bitcoin::PublicKey::from_slice(data) {
-                    pubkeys.push(pk);
-                }
-            }
+        if let Ok(elements::script::Instruction::PushBytes(data)) = instruction
+            && data.len() == 33
+            && let Ok(pk) = bitcoin::PublicKey::from_slice(data)
+        {
+            pubkeys.push(pk);
         }
     }
     pubkeys
