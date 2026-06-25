@@ -391,6 +391,37 @@ fn multi_wallet_attribution() {
 }
 
 #[test]
+fn multi_version_same_wallet_id_captured() {
+    // Two federation versions of ONE wallet (distinct keys → distinct scripts),
+    // both registered under the same wallet id — as the ingestion does after a
+    // migration. Funds at either version's address must be captured.
+    let v0 = make_wollet([1, 2, 3], 0xaa);
+    let v1 = make_wollet([4, 5, 6], 0xbb);
+    let id = wid(1);
+    let mut engine = BlockScanEngine::new();
+    engine.register_wallet(id, &v0, 20).unwrap();
+    engine.register_wallet(id, &v1, 20).unwrap();
+
+    let spk0 = v0.address(Chain::External, 0).unwrap().script_pubkey();
+    let spk1 = v1.address(Chain::External, 0).unwrap().script_pubkey();
+    let chain = MockChainSource::new();
+    build_chain(
+        &chain,
+        vec![vec![], vec![tx_paying(1, vec![(spk0, 11_000), (spk1, 22_000)])]],
+    );
+    let blocks = MemBlockStore::new();
+    let utxos = MemUtxoStore::new();
+
+    let summary = engine.sync(&chain, &blocks, &utxos).unwrap();
+    assert_eq!(summary.utxos_captured, 2);
+    let unspent = utxos.list_unspent(id).unwrap();
+    assert_eq!(unspent.len(), 2, "both versions captured under one wallet id");
+    let mut vals: Vec<u64> = unspent.iter().map(CapturedUtxo::value).collect();
+    vals.sort_unstable();
+    assert_eq!(vals, vec![11_000, 22_000]);
+}
+
+#[test]
 fn reorg_rolls_back_and_recaptures() {
     let w = make_wollet([1, 2, 3], 0xaa);
     let id = wid(1);

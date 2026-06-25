@@ -37,10 +37,21 @@ pub struct SyncSummary {
 /// matched outputs; build it fresh each sync pass (cheap) so newly-revealed
 /// addresses are picked up via an extended gap.
 pub struct BlockScanEngine<'w> {
-    /// `script_pubkey` -> (owning wallet, chain, wildcard index)
-    index: HashMap<Script, (WalletId, Chain, u32)>,
-    /// Registered wallets, for unblinding matched outputs.
-    wollets: HashMap<WalletId, &'w ElementsWollet>,
+    /// `script_pubkey` -> the wallet/chain/index + which registered wollet owns
+    /// it (so the right blinding key is used to unblind).
+    index: HashMap<Script, ScriptEntry>,
+    /// Registered wollets, indexed by [`ScriptEntry::wollet_idx`]. A single
+    /// `WalletId` may register multiple wollets (one per federation version,
+    /// each with its own descriptor and possibly its own blinding key).
+    wollets: Vec<&'w ElementsWollet>,
+}
+
+#[derive(Clone, Copy)]
+struct ScriptEntry {
+    wallet_id: WalletId,
+    chain: Chain,
+    wildcard_index: u32,
+    wollet_idx: usize,
 }
 
 impl<'w> BlockScanEngine<'w> {
@@ -49,12 +60,13 @@ impl<'w> BlockScanEngine<'w> {
     pub fn new() -> Self {
         Self {
             index: HashMap::new(),
-            wollets: HashMap::new(),
+            wollets: Vec::new(),
         }
     }
 
-    /// Register a wallet and index its external + internal scripts for indices
-    /// `0..gap`.
+    /// Register a wallet (or one federation version of it) under `id` and index
+    /// its external + internal scripts for indices `0..gap`. May be called
+    /// multiple times with the same `id` to watch several federation versions.
     ///
     /// # Errors
     ///
@@ -65,10 +77,19 @@ impl<'w> BlockScanEngine<'w> {
         wollet: &'w ElementsWollet,
         gap: u32,
     ) -> Result<(), SyncError> {
+        let wollet_idx = self.wollets.len();
+        self.wollets.push(wollet);
         for (spk, chain, widx) in wollet.watched_scripts(gap)? {
-            self.index.insert(spk, (id, chain, widx));
+            self.index.insert(
+                spk,
+                ScriptEntry {
+                    wallet_id: id,
+                    chain,
+                    wildcard_index: widx,
+                    wollet_idx,
+                },
+            );
         }
-        self.wollets.insert(id, wollet);
         Ok(())
     }
 
@@ -147,11 +168,8 @@ impl<'w> BlockScanEngine<'w> {
                 // outputs: match against the script index
                 for (vout, txout) in tx.output.iter().enumerate() {
                     let spk = &txout.script_pubkey;
-                    if let Some((wallet_id, chain_kind, widx)) = self.index.get(spk).copied() {
-                        let wollet = self
-                            .wollets
-                            .get(&wallet_id)
-                            .expect("indexed wallet must be registered");
+                    if let Some(entry) = self.index.get(spk).copied() {
+                        let wollet = self.wollets[entry.wollet_idx];
                         // An output may match a watched script yet be blinded
                         // with a key we don't hold (legacy/foreign change). We
                         // can't spend it, so skip rather than aborting the scan.
@@ -162,17 +180,17 @@ impl<'w> BlockScanEngine<'w> {
                         let vout = u32::try_from(vout).expect("vout fits in u32");
                         let outpoint = OutPoint::new(txid, vout);
                         captured.push(CapturedUtxo {
-                            wallet_id,
+                            wallet_id: entry.wallet_id,
                             outpoint,
                             txout: txout.clone(),
                             secrets,
-                            chain: chain_kind,
-                            wildcard_index: widx,
+                            chain: entry.chain,
+                            wildcard_index: entry.wildcard_index,
                             height: h,
                             is_spent: false,
                         });
                         // a later tx in this same block may spend it
-                        spend_index.insert(outpoint, wallet_id);
+                        spend_index.insert(outpoint, entry.wallet_id);
                     }
                 }
             }
