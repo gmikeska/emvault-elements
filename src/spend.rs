@@ -180,8 +180,9 @@ type SingleDescriptors = Vec<
     >,
 >;
 
-type DefiniteDesc =
-    elements_miniscript::descriptor::Descriptor<elements_miniscript::descriptor::DefiniteDescriptorKey>;
+type DefiniteDesc = elements_miniscript::descriptor::Descriptor<
+    elements_miniscript::descriptor::DefiniteDescriptorKey,
+>;
 
 /// Split a wollet's multipath descriptor into its `[external, internal]`
 /// single-path forms.
@@ -239,7 +240,10 @@ fn prepare_inputs(
     let mut enrich = HashMap::with_capacity(utxos.len());
     for u in utxos {
         external.push(external_utxo(u, max_weight));
-        enrich.insert(u.outpoint, definite_at(singles, u.chain as usize, u.wildcard_index)?);
+        enrich.insert(
+            u.outpoint,
+            definite_at(singles, u.chain as usize, u.wildcard_index)?,
+        );
     }
     Ok((external, enrich))
 }
@@ -430,7 +434,9 @@ mod tests {
 
         // Multi-account signing: each account's 2-of-3 signs only its inputs.
         let mut pset = blinded.into_pset();
-        for s in [&sg_f[0], &sg_f[1], &sg_c1[0], &sg_c1[1], &sg_c2[0], &sg_c2[1]] {
+        for s in [
+            &sg_f[0], &sg_f[1], &sg_c1[0], &sg_c1[1], &sg_c2[0], &sg_c2[1],
+        ] {
             s.sign_pset(&mut pset).unwrap();
         }
         crate::finalize_p2wsh_pset(&mut pset).unwrap();
@@ -518,16 +524,15 @@ mod tests {
                 .expect("fee change output present");
             captured_from_output(&w_f, tx.txid(), vout, &txout, wallet_id, 0).unwrap()
         };
-        let unblind_at =
-            |w: &ElementsWollet, tx: &elements::Transaction, dest: &Address| -> u64 {
-                let spk = dest.script_pubkey();
-                let txout = tx
-                    .output
-                    .iter()
-                    .find(|o| o.script_pubkey == spk)
-                    .expect("destination output present");
-                w.unblind(txout).unwrap().value
-            };
+        let unblind_at = |w: &ElementsWollet, tx: &elements::Transaction, dest: &Address| -> u64 {
+            let spk = dest.script_pubkey();
+            let txout = tx
+                .output
+                .iter()
+                .find(|o| o.script_pubkey == spk)
+                .expect("destination output present");
+            w.unblind(txout).unwrap().value
+        };
 
         // --- tx0: C1 + real fee utxo → C1 exact, change back to F old. ------
         let tx0 = run(

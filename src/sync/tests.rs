@@ -142,7 +142,12 @@ fn build_chain(chain: &MockChainSource, blocks: Vec<Vec<Transaction>>) -> Vec<Bl
     let mut prev = BlockHash::all_zeros();
     let mut hashes = vec![];
     for (height, txs) in blocks.into_iter().enumerate() {
-        let b = block_at(u32::try_from(height).expect("height fits u32"), prev, txs, 0);
+        let b = block_at(
+            u32::try_from(height).expect("height fits u32"),
+            prev,
+            txs,
+            0,
+        );
         prev = b.block_hash();
         hashes.push(prev);
         chain.push_block(b);
@@ -407,7 +412,10 @@ fn multi_version_same_wallet_id_captured() {
     let chain = MockChainSource::new();
     build_chain(
         &chain,
-        vec![vec![], vec![tx_paying(1, vec![(spk0, 11_000), (spk1, 22_000)])]],
+        vec![
+            vec![],
+            vec![tx_paying(1, vec![(spk0, 11_000), (spk1, 22_000)])],
+        ],
     );
     let blocks = MemBlockStore::new();
     let utxos = MemUtxoStore::new();
@@ -415,7 +423,11 @@ fn multi_version_same_wallet_id_captured() {
     let summary = engine.sync(&chain, &blocks, &utxos).unwrap();
     assert_eq!(summary.utxos_captured, 2);
     let unspent = utxos.list_unspent(id).unwrap();
-    assert_eq!(unspent.len(), 2, "both versions captured under one wallet id");
+    assert_eq!(
+        unspent.len(),
+        2,
+        "both versions captured under one wallet id"
+    );
     let mut vals: Vec<u64> = unspent.iter().map(CapturedUtxo::value).collect();
     vals.sort_unstable();
     assert_eq!(vals, vec![11_000, 22_000]);
