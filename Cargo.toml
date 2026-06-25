@@ -5,11 +5,18 @@ edition = "2024"
 description = "Elements/Liquid support for the Emerald multi-signature custody platform: confidential descriptor builder, ElementsSigner trait, and network types."
 license = "MIT OR Apache-2.0"
 
+[features]
+# Exposes the in-memory sync fakes (MemBlockStore, MemUtxoStore,
+# MockChainSource) for downstream test suites.
+test-utils = []
+
 [dependencies]
 asterism-core = { version = "0.1.0", path = "../asterism-core", features = ["elements"] }
 bitcoin = "0.32.10"
 elements = { version = "0.25", features = ["serde"] }
 elements-miniscript = { version = "0.4", features = ["serde"] }
+lwk_wollet = { version = "0.18.1", default-features = false }
+lwk_common = { version = "0.18.1", default-features = false }
 thiserror = "2.0.18"
 
 [dev-dependencies]

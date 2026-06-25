@@ -1,9 +1,11 @@
 //! [`ElementsFederatedWallet`] — Elements implementation of [`FederatedWallet`].
 //!
-//! Each federation version is paired with an [`ElementsWalletHandle`], a
-//! lightweight reference to a named watch-only wallet on the Elements daemon.
-//! The application creates the daemon wallets and passes handles in; this
-//! module is a container with no RPC, persistence, or sync logic.
+//! Each federation version is paired with an [`ElementsWalletHandle`], pure
+//! data (confidential descriptor + SLIP-77 blinding key) describing a
+//! client-side wollet. The handle carries exactly what
+//! [`crate::wollet::ElementsWollet`] needs to construct a
+//! `lwk_wollet::Wollet`; this module itself holds no RPC, persistence, or sync
+//! logic.
 
 use std::collections::HashSet;
 
@@ -21,16 +23,21 @@ use crate::network::ElementsNetwork;
 // ElementsWalletHandle
 // ---------------------------------------------------------------------------
 
-/// A lightweight handle to a named watch-only wallet on the Elements daemon.
+/// Pure-data handle describing one federation version's client-side wollet.
 ///
-/// Each handle stores its own SLIP-77 blinding key. Federation changes offer
-/// the opportunity to rotate the blinding key (to prevent old signers from
-/// obtaining newer transaction history via backup bundles), but rotation is
-/// not mandatory — organizations may keep the same key for accounting reasons.
+/// Holds the confidential descriptor and its SLIP-77 master blinding key —
+/// exactly the inputs [`crate::wollet::ElementsWollet`] needs to build a
+/// `lwk_wollet::Wollet`. Federation changes offer the opportunity to rotate the
+/// blinding key (to prevent old signers from obtaining newer transaction
+/// history via backup bundles), but rotation is not mandatory — organizations
+/// may keep the same key for accounting reasons.
+///
+/// Note: this no longer carries a daemon wallet name. The daemon-wallet model
+/// did not scale; UTXO capture is now done by the shared block-scan pipeline
+/// (see [`crate::sync`]), and any persistence identity is owned by the
+/// consuming application.
 #[derive(Clone, Debug)]
 pub struct ElementsWalletHandle {
-    /// The wallet name on the Elements daemon (used in RPC calls).
-    pub wallet_name: String,
     /// The confidential descriptor for this federation version.
     pub ct_descriptor: ConfidentialDescriptor<DescriptorPublicKey>,
     /// The 32-byte SLIP-77 master blinding key for this federation version.
@@ -40,12 +47,10 @@ pub struct ElementsWalletHandle {
 impl ElementsWalletHandle {
     /// Create a new handle.
     pub fn new(
-        wallet_name: String,
         ct_descriptor: ConfidentialDescriptor<DescriptorPublicKey>,
         blinding_key: [u8; 32],
     ) -> Self {
         Self {
-            wallet_name,
             ct_descriptor,
             blinding_key,
         }
@@ -328,7 +333,7 @@ mod tests {
     }
 
     fn make_handle(
-        name: &str,
+        _name: &str,
         fed: &Federation<FakeSigner>,
         blinding_key: [u8; 32],
     ) -> ElementsWalletHandle {
@@ -338,7 +343,7 @@ mod tests {
             builder.add_signer(signer).unwrap();
         }
         let desc = builder.build().unwrap();
-        ElementsWalletHandle::new(name.to_string(), desc, blinding_key)
+        ElementsWalletHandle::new(desc, blinding_key)
     }
 
     #[test]
@@ -407,11 +412,11 @@ mod tests {
         let h2 = make_handle("wallet-v2", &fed2, [0xbb; 32]);
         let fw = fw.with_federation(fed2, h2).unwrap();
 
-        let names: Vec<&str> = fw
-            .wallet_handles()
-            .map(|h| h.wallet_name.as_str())
-            .collect();
-        assert_eq!(names, vec!["wallet-v1", "wallet-v2"]);
+        // Identity is now carried by the blinding key + descriptor, not a name.
+        let blinding_keys: Vec<[u8; 32]> =
+            fw.wallet_handles().map(|h| h.blinding_key).collect();
+        assert_eq!(blinding_keys, vec![[0xaa; 32], [0xbb; 32]]);
+        assert_eq!(fw.wallet_handles().count(), 2);
     }
 
     #[test]
@@ -501,7 +506,6 @@ mod tests {
             .collect();
         let fed = Federation::new(2, signers, Network::Regtest.into()).unwrap();
         let handle = ElementsWalletHandle::new(
-            "test".to_string(),
             // Use a dummy descriptor — we expect the network check to fire first
             {
                 use crate::descriptor::CtDescriptorBuilder;

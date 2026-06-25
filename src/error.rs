@@ -52,6 +52,71 @@ pub enum PsetError {
     InvalidSignature(SignerId, String),
 }
 
+/// Errors from [`crate::wollet::ElementsWollet`] construction and operations.
+#[derive(Debug, Error)]
+pub enum WolletError {
+    /// The confidential descriptor could not be parsed into a
+    /// `lwk_wollet::WolletDescriptor`.
+    #[error("failed to parse wollet descriptor: {0}")]
+    Descriptor(String),
+
+    /// `lwk_wollet::WolletBuilder::build` failed.
+    #[error("failed to build wollet: {0}")]
+    Build(String),
+
+    /// Address derivation failed for a given index/chain.
+    #[error("failed to derive address: {0}")]
+    AddressDerivation(String),
+
+    /// Unblinding a confidential output failed (wrong key, malformed
+    /// commitments, or an unexpected explicit/null field).
+    #[error("failed to unblind output: {0}")]
+    Unblind(String),
+}
+
+/// Errors from spend construction ([`crate::spend`]).
+#[derive(Debug, Error)]
+pub enum SpendError {
+    /// LWK's `TxBuilder` failed to construct/blind the transaction (e.g.
+    /// insufficient funds).
+    #[error("transaction build failed: {0}")]
+    Build(String),
+
+    /// Deriving the spending descriptor for an input failed.
+    #[error("descriptor derivation failed: {0}")]
+    Descriptor(String),
+
+    /// Populating an input's `witness_script` / `bip32_derivation` failed.
+    #[error("input enrichment failed: {0}")]
+    Enrich(String),
+
+    /// The constructed PSET was rejected by the pipeline newtype.
+    #[error(transparent)]
+    Pset(#[from] PsetError),
+}
+
+/// Errors from the shared block-scan pipeline ([`crate::sync`]).
+#[derive(Debug, Error)]
+pub enum SyncError {
+    /// A storage backend ([`crate::sync::BlockStore`] /
+    /// [`crate::sync::WalletUtxoStore`]) returned an error.
+    #[error("store error: {0}")]
+    Store(String),
+
+    /// The chain source ([`crate::sync::ElementsChainSource`]) returned an
+    /// error.
+    #[error("chain source error: {0}")]
+    ChainSource(String),
+
+    /// Consensus (de)serialization of a block or transaction failed.
+    #[error("encoding error: {0}")]
+    Encoding(String),
+
+    /// Wallet-level error (descriptor derivation or unblinding) while scanning.
+    #[error(transparent)]
+    Wollet(#[from] WolletError),
+}
+
 /// Errors from confidential descriptor construction.
 #[derive(Debug, Error)]
 pub enum CtDescriptorError {

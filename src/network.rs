@@ -25,19 +25,41 @@ impl ElementsNetwork {
         }
     }
 
-    /// Returns the [`lwk_wollet::ElementsNetwork`]-compatible network
-    /// identifier.
+    /// Returns the [`lwk_wollet::Network`] value that LWK's `WolletBuilder`
+    /// and blockchain clients expect.
     ///
-    /// LWK uses the same enum shape but its own type. This method returns
-    /// the `elements::bitcoin::Network` value that LWK's `WolletBuilder`
-    /// and `EsploraClient` expect.
+    /// `ElementsRegtest` maps to `Network::default_regtest()` (LWK's *default*
+    /// regtest parameters). A real `elementsd` regtest node usually has a
+    /// different policy asset and genesis hash; in that case construct the
+    /// network from the node's values via [`Self::custom_regtest`] and use the
+    /// `*_with_lwk` constructors so blinding, fee accounting, and the signing
+    /// genesis all match the node.
     #[must_use]
-    pub fn lwk_network(&self) -> elements::bitcoin::Network {
+    pub fn to_lwk(&self) -> lwk_wollet::Network {
         match self {
-            Self::Liquid => elements::bitcoin::Network::Bitcoin,
-            Self::LiquidTestnet => elements::bitcoin::Network::Testnet,
-            Self::ElementsRegtest => elements::bitcoin::Network::Regtest,
+            Self::Liquid => lwk_wollet::Network::Liquid,
+            Self::LiquidTestnet => lwk_wollet::Network::TestnetLiquid,
+            Self::ElementsRegtest => lwk_wollet::Network::default_regtest(),
         }
+    }
+
+    /// Build an [`lwk_wollet::Network`] for a custom Elements regtest using the
+    /// node's actual policy (L-BTC) asset and genesis block hash.
+    ///
+    /// These differ per node configuration, so the consuming application should
+    /// source them from the node (`getsidechaininfo.pegged_asset` and
+    /// `getblockhash 0`).
+    #[must_use]
+    pub fn custom_regtest(
+        policy_asset: elements::AssetId,
+        genesis_hash: elements::BlockHash,
+    ) -> lwk_wollet::Network {
+        let params = lwk_common::ElementsParamsBuilder::new()
+            .with_policy_asset(policy_asset)
+            .with_genesis_hash(genesis_hash)
+            .build()
+            .expect("valid Elements params");
+        lwk_wollet::Network::CustomElements(params)
     }
 
     /// Convert to the lightweight [`ElementsNetworkId`] carried by
