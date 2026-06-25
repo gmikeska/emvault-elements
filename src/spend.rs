@@ -40,7 +40,8 @@ pub fn build_spend_pset(
     amount_sat: u64,
     fee_rate_sat_per_kvb: f32,
 ) -> Result<BlindedPset, SpendError> {
-    let (external, singles) = prepare_inputs(wollet, utxos)?;
+    let singles = singles_of(wollet)?;
+    let (external, enrich) = prepare_inputs(utxos, &singles)?;
     let pset = TxBuilder::new(wollet.lwk_network())
         .add_external_utxos(external)
         .map_err(|e| SpendError::Build(e.to_string()))?
@@ -49,7 +50,7 @@ pub fn build_spend_pset(
         .fee_rate(Some(fee_rate_sat_per_kvb))
         .finish(wollet.inner())
         .map_err(|e| SpendError::Build(e.to_string()))?;
-    finish_blinded(pset, utxos, &singles)
+    finish_blinded(pset, &enrich)
 }
 
 /// Like [`build_spend_pset`] but **sweeps** all provided UTXOs to `recipient`
@@ -64,7 +65,8 @@ pub fn build_sweep_pset(
     recipient: &Address,
     fee_rate_sat_per_kvb: f32,
 ) -> Result<BlindedPset, SpendError> {
-    let (external, singles) = prepare_inputs(wollet, utxos)?;
+    let singles = singles_of(wollet)?;
+    let (external, enrich) = prepare_inputs(utxos, &singles)?;
     let pset = TxBuilder::new(wollet.lwk_network())
         .add_external_utxos(external)
         .map_err(|e| SpendError::Build(e.to_string()))?
@@ -73,7 +75,62 @@ pub fn build_sweep_pset(
         .fee_rate(Some(fee_rate_sat_per_kvb))
         .finish(wollet.inner())
         .map_err(|e| SpendError::Build(e.to_string()))?;
-    finish_blinded(pset, utxos, &singles)
+    finish_blinded(pset, &enrich)
+}
+
+/// Build a blinded **migration** PSET: many accounts' UTXOs in, each customer
+/// paid their exact amount, and the **fee account pays the mining fee** by
+/// absorbing the remainder via an L-BTC drain output.
+///
+/// `inputs` pairs each captured UTXO with the [`ElementsWollet`] that owns it
+/// (so its inputs are enriched with the correct multisig metadata).
+/// `customer_recipients` are exact `(address, amount)` pairs;
+/// `fee_account_dest` receives `sum(inputs) - sum(customers) - fee`.
+///
+/// # Errors
+///
+/// Same as [`build_spend_pset`]; also if an input's owning descriptor cannot be
+/// derived.
+pub fn build_migration_pset(
+    fee_wollet: &ElementsWollet,
+    inputs: &[(CapturedUtxo, &ElementsWollet)],
+    customer_recipients: &[(Address, u64)],
+    fee_account_dest: &Address,
+    fee_rate_sat_per_kvb: f32,
+) -> Result<BlindedPset, SpendError> {
+    // Cache each distinct owning descriptor's single-path forms.
+    let mut singles_cache: HashMap<String, SingleDescriptors> = HashMap::new();
+    let mut external = Vec::with_capacity(inputs.len());
+    let mut enrich: HashMap<OutPoint, DefiniteDesc> = HashMap::new();
+
+    for (utxo, owner) in inputs {
+        let key = owner.descriptor().to_string();
+        if !singles_cache.contains_key(&key) {
+            singles_cache.insert(key.clone(), singles_of(owner)?);
+        }
+        let singles = &singles_cache[&key];
+        external.push(external_utxo(utxo, max_weight_of(singles)?));
+        enrich.insert(
+            utxo.outpoint,
+            definite_at(singles, utxo.chain as usize, utxo.wildcard_index)?,
+        );
+    }
+
+    let mut builder = TxBuilder::new(fee_wollet.lwk_network())
+        .add_external_utxos(external)
+        .map_err(|e| SpendError::Build(e.to_string()))?;
+    for (addr, amount) in customer_recipients {
+        builder = builder
+            .add_lbtc_recipient(addr, *amount)
+            .map_err(|e| SpendError::Build(e.to_string()))?;
+    }
+    let pset = builder
+        .drain_lbtc_wallet()
+        .drain_lbtc_to(fee_account_dest.clone())
+        .fee_rate(Some(fee_rate_sat_per_kvb))
+        .finish(fee_wollet.inner())
+        .map_err(|e| SpendError::Build(e.to_string()))?;
+    finish_blinded(pset, &enrich)
 }
 
 type SingleDescriptors = Vec<
@@ -82,69 +139,85 @@ type SingleDescriptors = Vec<
     >,
 >;
 
-/// Map captured UTXOs to LWK `ExternalUtxo`s and split the descriptor into its
-/// [external, internal] single-path forms.
-fn prepare_inputs(
-    wollet: &ElementsWollet,
-    utxos: &[CapturedUtxo],
-) -> Result<(Vec<ExternalUtxo>, SingleDescriptors), SpendError> {
-    let multi = wollet
+type DefiniteDesc =
+    elements_miniscript::descriptor::Descriptor<elements_miniscript::descriptor::DefiniteDescriptorKey>;
+
+/// Split a wollet's multipath descriptor into its `[external, internal]`
+/// single-path forms.
+fn singles_of(wollet: &ElementsWollet) -> Result<SingleDescriptors, SpendError> {
+    wollet
         .descriptor()
         .descriptor()
         .map_err(|e| SpendError::Descriptor(e.to_string()))?
-        .clone();
-    let singles = multi
+        .clone()
         .into_single_descriptors()
-        .map_err(|e| SpendError::Descriptor(e.to_string()))?;
+        .map_err(|e| SpendError::Descriptor(e.to_string()))
+}
 
-    let max_weight = singles
+/// Max satisfaction weight, identical across indices for our multisig.
+fn max_weight_of(singles: &SingleDescriptors) -> Result<usize, SpendError> {
+    singles
         .first()
         .ok_or_else(|| SpendError::Descriptor("descriptor has no chains".into()))?
         .at_derivation_index(0)
         .map_err(|e| SpendError::Descriptor(e.to_string()))?
         .max_weight_to_satisfy()
-        .map_err(|e| SpendError::Descriptor(e.to_string()))?;
-
-    let external = utxos
-        .iter()
-        .map(|u| ExternalUtxo {
-            outpoint: u.outpoint,
-            txout: u.txout.clone(),
-            tx: None,
-            unblinded: u.secrets,
-            max_weight_to_satisfy: max_weight,
-        })
-        .collect();
-    Ok((external, singles))
+        .map_err(|e| SpendError::Descriptor(e.to_string()))
 }
 
-/// Enrich each of our inputs with `witness_script` + `bip32_derivation`, then
-/// wrap as a [`BlindedPset`].
-fn finish_blinded(
-    mut pset: elements::pset::PartiallySignedTransaction,
+fn external_utxo(u: &CapturedUtxo, max_weight: usize) -> ExternalUtxo {
+    ExternalUtxo {
+        outpoint: u.outpoint,
+        txout: u.txout.clone(),
+        tx: None,
+        unblinded: u.secrets,
+        max_weight_to_satisfy: max_weight,
+    }
+}
+
+/// The definite (concrete-index) descriptor for `chain`/`index`.
+fn definite_at(
+    singles: &SingleDescriptors,
+    chain: usize,
+    index: u32,
+) -> Result<DefiniteDesc, SpendError> {
+    singles
+        .get(chain)
+        .ok_or_else(|| SpendError::Descriptor("missing chain descriptor".into()))?
+        .at_derivation_index(index)
+        .map_err(|e| SpendError::Descriptor(e.to_string()))
+}
+
+/// Single-wallet input prep: external UTXOs + a per-outpoint enrichment map.
+fn prepare_inputs(
     utxos: &[CapturedUtxo],
     singles: &SingleDescriptors,
-) -> Result<BlindedPset, SpendError> {
-    let by_outpoint: HashMap<OutPoint, (usize, u32)> = utxos
-        .iter()
-        .map(|u| (u.outpoint, (u.chain as usize, u.wildcard_index)))
-        .collect();
+) -> Result<(Vec<ExternalUtxo>, HashMap<OutPoint, DefiniteDesc>), SpendError> {
+    let max_weight = max_weight_of(singles)?;
+    let mut external = Vec::with_capacity(utxos.len());
+    let mut enrich = HashMap::with_capacity(utxos.len());
+    for u in utxos {
+        external.push(external_utxo(u, max_weight));
+        enrich.insert(u.outpoint, definite_at(singles, u.chain as usize, u.wildcard_index)?);
+    }
+    Ok((external, enrich))
+}
 
+/// Enrich each of our inputs with `witness_script` + `bip32_derivation` (from
+/// its owning descriptor), then wrap as a [`BlindedPset`].
+fn finish_blinded(
+    mut pset: elements::pset::PartiallySignedTransaction,
+    enrich: &HashMap<OutPoint, DefiniteDesc>,
+) -> Result<BlindedPset, SpendError> {
     for idx in 0..pset.inputs().len() {
         let input = &pset.inputs()[idx];
         let prevout = OutPoint::new(input.previous_txid, input.previous_output_index);
-        let Some((chain_idx, index)) = by_outpoint.get(&prevout).copied() else {
+        let Some(definite) = enrich.get(&prevout) else {
             continue;
         };
-        let definite = singles
-            .get(chain_idx)
-            .ok_or_else(|| SpendError::Descriptor("missing chain descriptor".into()))?
-            .at_derivation_index(index)
-            .map_err(|e| SpendError::Descriptor(e.to_string()))?;
-        pset.update_input_with_descriptor(idx, &definite)
+        pset.update_input_with_descriptor(idx, definite)
             .map_err(|e| SpendError::Enrich(e.to_string()))?;
     }
-
     Ok(BlindedPset::new(pset)?)
 }
 
@@ -158,6 +231,8 @@ mod tests {
     use crate::sync::WalletId;
 
     use crate::testkit::SoftwareSigner as SoftSigner;
+
+    use crate::signer::ElementsSigner;
 
     use asterism_core::federation::Federation;
     use asterism_core::network::{ElementsNetworkId, NetworkType};
@@ -241,6 +316,91 @@ mod tests {
         let mut u = captured_lbtc(WalletId::from_bytes([1; 16]), index, value, txid_seed);
         u.txout = explicit_txout(addr.script_pubkey(), value);
         u
+    }
+
+    /// Multi-account, fee-account-pays migration PSET: customers receive exact
+    /// amounts, the fee account absorbs the mining fee via the drain, and each
+    /// account signs only its own inputs.
+    #[test]
+    fn migration_fee_account_pays_and_multi_account_signs() {
+        // Fee account F + two customers C1, C2 (distinct keys → distinct scripts).
+        let (_fed_f, w_f, sg_f) = federation_and_wollet([1, 2, 3], 0xaa);
+        let (_fed_c1, w_c1, sg_c1) = federation_and_wollet([4, 5, 6], 0xbb);
+        let (_fed_c2, w_c2, sg_c2) = federation_and_wollet([7, 8, 9], 0xcc);
+
+        // F holds 100k (to pay the fee); customers hold their balances.
+        let f_utxo = funding_utxo(&w_f, 0, 100_000, 1);
+        let c1_utxo = funding_utxo(&w_c1, 0, 200_000, 2);
+        let c2_utxo = funding_utxo(&w_c2, 0, 300_000, 3);
+
+        // New-federation destinations (each wallet's own index-5 addr so we can
+        // unblind and verify exact amounts).
+        let c1_dest = w_c1.address(lwk_wollet::Chain::External, 5).unwrap();
+        let c2_dest = w_c2.address(lwk_wollet::Chain::External, 5).unwrap();
+        let f_dest = w_f.address(lwk_wollet::Chain::External, 5).unwrap();
+
+        let inputs = vec![(f_utxo, &w_f), (c1_utxo, &w_c1), (c2_utxo, &w_c2)];
+        let blinded = build_migration_pset(
+            &w_f,
+            &inputs,
+            &[(c1_dest.clone(), 200_000), (c2_dest.clone(), 300_000)],
+            &f_dest,
+            2000.0,
+        )
+        .unwrap();
+
+        // Structural: 3 inputs enriched, outputs blinded.
+        {
+            let pset = blinded.as_pset();
+            assert_eq!(pset.inputs().len(), 3);
+            for inp in pset.inputs() {
+                assert!(inp.witness_script.is_some());
+                assert_eq!(inp.bip32_derivation.len(), 3);
+            }
+            assert!(pset.outputs().iter().any(|o| o.value_rangeproof.is_some()));
+        }
+
+        // Fee-account-pays: customers get exact; fee account drains the rest.
+        let tx = blinded.as_pset().extract_tx().unwrap();
+        let unblind_at = |w: &ElementsWollet, dest: &Address| -> u64 {
+            let spk = dest.script_pubkey();
+            let txout = tx
+                .output
+                .iter()
+                .find(|o| o.script_pubkey == spk)
+                .expect("destination output present");
+            w.unblind(txout).unwrap().value
+        };
+        assert_eq!(unblind_at(&w_c1, &c1_dest), 200_000, "customer 1 exact");
+        assert_eq!(unblind_at(&w_c2, &c2_dest), 300_000, "customer 2 exact");
+        let fee_change = unblind_at(&w_f, &f_dest);
+        let fee_sat = tx
+            .output
+            .iter()
+            .find(|o| o.script_pubkey.is_empty())
+            .and_then(|o| o.value.explicit())
+            .unwrap();
+        assert!(fee_sat > 0, "non-zero fee");
+        assert_eq!(
+            fee_change + fee_sat,
+            100_000,
+            "fee account paid: its 100k = drain change + fee, customers untouched"
+        );
+
+        // Multi-account signing: each account's 2-of-3 signs only its inputs.
+        let mut pset = blinded.into_pset();
+        for s in [&sg_f[0], &sg_f[1], &sg_c1[0], &sg_c1[1], &sg_c2[0], &sg_c2[1]] {
+            s.sign_pset(&mut pset).unwrap();
+        }
+        crate::finalize_p2wsh_pset(&mut pset).unwrap();
+        let final_tx = pset.extract_tx().unwrap();
+        assert_eq!(final_tx.input.len(), 3);
+        for inp in &final_tx.input {
+            assert!(
+                inp.witness.script_witness.len() >= 4,
+                "each input finalized with a witness"
+            );
+        }
     }
 
     #[test]

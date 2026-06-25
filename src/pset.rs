@@ -422,6 +422,17 @@ pub fn finalize_p2wsh_pset(pset: &mut Pset) -> Result<(), PsetError> {
             }
         }
 
+        // `OP_CHECKMULTISIG` consumes exactly `m` signatures (the threshold,
+        // encoded as the leading `OP_m` of the witness script). Extra sigs make
+        // the dummy element non-empty and the script fails ("Dummy CHECKMULTISIG
+        // argument must be zero"), so for an m-of-n with more than m collected
+        // signatures we keep only the first m in script order.
+        if let Some(m) = multisig_threshold(&witness_script)
+            && ordered_sigs.len() > m
+        {
+            ordered_sigs.truncate(m);
+        }
+
         // Build the witness: OP_0 (multisig bug) + sigs + witness_script
         let mut witness = vec![vec![]]; // OP_0
         witness.extend(ordered_sigs);
@@ -439,6 +450,16 @@ pub fn finalize_p2wsh_pset(pset: &mut Pset) -> Result<(), PsetError> {
     }
 
     Ok(())
+}
+
+/// The required-signature count `m` from a `sortedmulti` witness script
+/// (`OP_m <pk1>…<pkN> OP_n OP_CHECKMULTISIG`). `OP_1..=OP_16` encode as
+/// `0x50 + m`; returns `None` if the leading opcode isn't a small integer.
+fn multisig_threshold(script: &Script) -> Option<usize> {
+    match script.as_bytes().first().copied()? {
+        b @ 0x51..=0x60 => Some((b - 0x50) as usize),
+        _ => None,
+    }
 }
 
 /// Extract compressed public keys from a P2WSH multisig witness script.
