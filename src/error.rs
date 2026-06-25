@@ -90,6 +90,11 @@ pub enum SpendError {
     #[error("input enrichment failed: {0}")]
     Enrich(String),
 
+    /// Unblinding a confidential output (e.g. a chained fee-change output)
+    /// failed.
+    #[error("output unblind failed: {0}")]
+    Unblind(String),
+
     /// The constructed PSET was rejected by the pipeline newtype.
     #[error(transparent)]
     Pset(#[from] PsetError),

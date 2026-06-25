@@ -11,13 +11,13 @@
 
 use std::collections::HashMap;
 
-use elements::{Address, OutPoint};
+use elements::{Address, OutPoint, Txid};
 use elements_miniscript::psbt::PsbtExt;
 use lwk_wollet::{ExternalUtxo, TxBuilder};
 
 use crate::error::SpendError;
 use crate::pset::BlindedPset;
-use crate::sync::CapturedUtxo;
+use crate::sync::{CapturedUtxo, WalletId};
 use crate::wollet::ElementsWollet;
 
 /// Build a blinded, signable PSET spending `utxos` to pay `amount_sat` L-BTC to
@@ -131,6 +131,47 @@ pub fn build_migration_pset(
         .finish(fee_wollet.inner())
         .map_err(|e| SpendError::Build(e.to_string()))?;
     finish_blinded(pset, &enrich)
+}
+
+/// Build a [`CapturedUtxo`] from a freshly-broadcast (still-unconfirmed)
+/// confidential output that `wollet` controls — used to **chain** the fee
+/// account's change from one batched-migration transaction into the next
+/// without waiting for a confirmation or a re-scan.
+///
+/// `wollet` must own the output's script (so it can recover the blinding
+/// secrets); for the batched migration this is the fee account's wollet, and
+/// the chained change is routed back to its own address each hop.
+///
+/// `wildcard_index` is the derivation index of the destination address the
+/// change was paid to (the batched flow uses the external chain at index 0).
+/// `height` is recorded as `0` (unconfirmed); the value is informational here
+/// since the UTXO is consumed immediately as an `ExternalUtxo`.
+///
+/// # Errors
+///
+/// [`SpendError::Unblind`] if the output does not belong to `wollet` or its
+/// confidential commitments cannot be opened.
+pub fn captured_from_output(
+    wollet: &ElementsWollet,
+    txid: Txid,
+    vout: u32,
+    txout: &elements::TxOut,
+    wallet_id: WalletId,
+    wildcard_index: u32,
+) -> Result<CapturedUtxo, SpendError> {
+    let secrets = wollet
+        .unblind(txout)
+        .map_err(|e| SpendError::Unblind(e.to_string()))?;
+    Ok(CapturedUtxo {
+        wallet_id,
+        outpoint: OutPoint::new(txid, vout),
+        txout: txout.clone(),
+        secrets,
+        chain: lwk_wollet::Chain::External,
+        wildcard_index,
+        height: 0,
+        is_spent: false,
+    })
 }
 
 type SingleDescriptors = Vec<
@@ -401,6 +442,139 @@ mod tests {
                 "each input finalized with a witness"
             );
         }
+    }
+
+    /// Batched migration with **chained confidential fee-change** (decision
+    /// (b)): the fee account's change is routed back to its OWN old-fed address
+    /// each hop, captured via [`captured_from_output`], and fed into the next
+    /// tx. The final fee-only tx (empty customer set) drains to the new-fed
+    /// address. Asserts customers get exact amounts, value is conserved across
+    /// the chain (only mining fees leak), and every input signs+finalizes.
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn batched_migration_chains_fee_change_offline() {
+        const INITIAL_FEE: u64 = 1_000_000;
+        const C1_BAL: u64 = 200_000;
+        const C2_BAL: u64 = 300_000;
+        const RATE_KVB: f32 = 1000.0; // 1 sat/vB
+
+        let (_f_fed, w_f, sg_f) = federation_and_wollet([1, 2, 3], 0xaa);
+        let (_c1_fed, w_c1, sg_c1) = federation_and_wollet([4, 5, 6], 0xbb);
+        let (_c2_fed, w_c2, sg_c2) = federation_and_wollet([7, 8, 9], 0xcc);
+
+        let f_utxo = funding_utxo(&w_f, 0, INITIAL_FEE, 1);
+        let c1_utxo = funding_utxo(&w_c1, 0, C1_BAL, 2);
+        let c2_utxo = funding_utxo(&w_c2, 0, C2_BAL, 3);
+
+        // Customer new-fed destinations (own index-5 addr so we can unblind).
+        let c1_dest = w_c1.address(lwk_wollet::Chain::External, 5).unwrap();
+        let c2_dest = w_c2.address(lwk_wollet::Chain::External, 5).unwrap();
+        // Fee account: OLD-fed change sink (External/0) for intermediate hops;
+        // a distinct NEW-fed address (index 6) only for the final tx.
+        let f_old = w_f.address(lwk_wollet::Chain::External, 0).unwrap();
+        let f_new = w_f.address(lwk_wollet::Chain::External, 6).unwrap();
+
+        let wallet_id = WalletId::from_bytes([1; 16]);
+
+        // Build one batch tx, sign with `signers`, finalize, extract.
+        let run = |inputs: &[(CapturedUtxo, &ElementsWollet)],
+                   customers: &[(Address, u64)],
+                   fee_dest: &Address,
+                   signers: &[&SoftSigner]|
+         -> elements::Transaction {
+            let blinded =
+                build_migration_pset(&w_f, inputs, customers, fee_dest, RATE_KVB).unwrap();
+            let mut pset = blinded.into_pset();
+            for s in signers {
+                s.sign_pset(&mut pset).unwrap();
+            }
+            crate::finalize_p2wsh_pset(&mut pset).unwrap();
+            let tx = pset.extract_tx().unwrap();
+            for inp in &tx.input {
+                assert!(
+                    inp.witness.script_witness.len() >= 4,
+                    "each input finalized with a witness"
+                );
+            }
+            tx
+        };
+
+        let fee_of = |tx: &elements::Transaction| -> u64 {
+            tx.output
+                .iter()
+                .find(|o| o.script_pubkey.is_empty())
+                .and_then(|o| o.value.explicit())
+                .expect("explicit fee output")
+        };
+        // Capture the fee account's change output (at `f_old`) as a chained UTXO.
+        let chain_change = |tx: &elements::Transaction| -> CapturedUtxo {
+            let spk = f_old.script_pubkey();
+            let (vout, txout) = tx
+                .output
+                .iter()
+                .enumerate()
+                .find(|(_, o)| o.script_pubkey == spk)
+                .map(|(i, o)| (u32::try_from(i).unwrap(), o.clone()))
+                .expect("fee change output present");
+            captured_from_output(&w_f, tx.txid(), vout, &txout, wallet_id, 0).unwrap()
+        };
+        let unblind_at =
+            |w: &ElementsWollet, tx: &elements::Transaction, dest: &Address| -> u64 {
+                let spk = dest.script_pubkey();
+                let txout = tx
+                    .output
+                    .iter()
+                    .find(|o| o.script_pubkey == spk)
+                    .expect("destination output present");
+                w.unblind(txout).unwrap().value
+            };
+
+        // --- tx0: C1 + real fee utxo → C1 exact, change back to F old. ------
+        let tx0 = run(
+            &[(c1_utxo, &w_c1), (f_utxo, &w_f)],
+            &[(c1_dest.clone(), C1_BAL)],
+            &f_old,
+            &[&sg_c1[0], &sg_c1[1], &sg_f[0], &sg_f[1]],
+        );
+        assert_eq!(unblind_at(&w_c1, &tx0, &c1_dest), C1_BAL, "C1 exact");
+        let fee0 = fee_of(&tx0);
+        let change0 = chain_change(&tx0);
+        assert_eq!(
+            change0.value(),
+            INITIAL_FEE - fee0,
+            "after tx0 the fee account holds its balance minus fee0 (C1 untouched)"
+        );
+
+        // --- tx1: C2 + chained change → C2 exact, change back to F old. -----
+        let tx1 = run(
+            &[(c2_utxo, &w_c2), (change0, &w_f)],
+            &[(c2_dest.clone(), C2_BAL)],
+            &f_old,
+            &[&sg_c2[0], &sg_c2[1], &sg_f[0], &sg_f[1]],
+        );
+        assert_eq!(unblind_at(&w_c2, &tx1, &c2_dest), C2_BAL, "C2 exact");
+        let fee1 = fee_of(&tx1);
+        let change1 = chain_change(&tx1);
+        assert_eq!(
+            change1.value(),
+            INITIAL_FEE - fee0 - fee1,
+            "after tx1 the fee account holds its balance minus fees so far"
+        );
+
+        // --- tx2: fee-only final tx (empty customers) → drain to F new. -----
+        let tx2 = run(&[(change1, &w_f)], &[], &f_new, &[&sg_f[0], &sg_f[1]]);
+        // Empty-customer drain (risk #2): exactly one recipient output + fee.
+        assert_eq!(tx2.output.len(), 2, "final fee-only tx: drain output + fee");
+        let fee2 = fee_of(&tx2);
+        let final_value = unblind_at(&w_f, &tx2, &f_new);
+
+        // Value conservation across the whole chain: the fee account's initial
+        // balance ends up at the new federation, less the cumulative mining fee.
+        assert_eq!(
+            final_value + fee0 + fee1 + fee2,
+            INITIAL_FEE,
+            "fee account paid exactly the cumulative fee; customers got full balances"
+        );
     }
 
     #[test]

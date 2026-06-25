@@ -63,7 +63,7 @@ pub use pset::{
     unblind_input,
 };
 pub use signer::ElementsSigner;
-pub use spend::{build_migration_pset, build_spend_pset, build_sweep_pset};
+pub use spend::{build_migration_pset, build_spend_pset, build_sweep_pset, captured_from_output};
 pub use sync::{
     BlockScanEngine, BlockStore, CapturedUtxo, ElementsChainSource, SyncedTip, WalletId,
     WalletUtxoStore,
