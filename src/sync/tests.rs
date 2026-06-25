@@ -10,8 +10,9 @@ use std::str::FromStr;
 use elements::confidential::{Asset, AssetBlindingFactor, Nonce, Value, ValueBlindingFactor};
 use elements::hashes::Hash;
 use elements::{
-    AssetId, Block, BlockExtData as ExtData, BlockHash, BlockHeader, LockTime, OutPoint, Script,
-    Sequence, Transaction, TxIn, TxMerkleNode, TxOut, TxOutSecrets, TxOutWitness,
+    AssetId, AssetIssuance, Block, BlockExtData as ExtData, BlockHash, BlockHeader, LockTime,
+    OutPoint, Script, Sequence, Transaction, TxIn, TxInWitness, TxMerkleNode, TxOut, TxOutSecrets,
+    TxOutWitness,
 };
 
 use crate::ElementsWalletHandle;
@@ -74,7 +75,7 @@ fn explicit_txout(spk: Script, value: u64) -> TxOut {
 /// given `(script, value)` outputs.
 fn tx_paying(nonce: u8, outs: Vec<(Script, u64)>) -> Transaction {
     let mut prevout = OutPoint::null();
-    prevout.vout = nonce as u32; // make the input (and thus txid) unique
+    prevout.vout = u32::from(nonce); // make the input (and thus txid) unique
     Transaction {
         version: 2,
         lock_time: LockTime::ZERO,
@@ -83,8 +84,8 @@ fn tx_paying(nonce: u8, outs: Vec<(Script, u64)>) -> Transaction {
             is_pegin: false,
             script_sig: Script::new(),
             sequence: Sequence::MAX,
-            asset_issuance: Default::default(),
-            witness: Default::default(),
+            asset_issuance: AssetIssuance::default(),
+            witness: TxInWitness::default(),
         }],
         output: outs
             .into_iter()
@@ -105,8 +106,8 @@ fn tx_spending(inputs: Vec<OutPoint>, outs: Vec<(Script, u64)>) -> Transaction {
                 is_pegin: false,
                 script_sig: Script::new(),
                 sequence: Sequence::MAX,
-                asset_issuance: Default::default(),
-                witness: Default::default(),
+                asset_issuance: AssetIssuance::default(),
+                witness: TxInWitness::default(),
             })
             .collect(),
         output: outs
@@ -141,7 +142,7 @@ fn build_chain(chain: &MockChainSource, blocks: Vec<Vec<Transaction>>) -> Vec<Bl
     let mut prev = BlockHash::all_zeros();
     let mut hashes = vec![];
     for (height, txs) in blocks.into_iter().enumerate() {
-        let b = block_at(height as u32, prev, txs, 0);
+        let b = block_at(u32::try_from(height).expect("height fits u32"), prev, txs, 0);
         prev = b.block_hash();
         hashes.push(prev);
         chain.push_block(b);
@@ -151,7 +152,7 @@ fn build_chain(chain: &MockChainSource, blocks: Vec<Vec<Transaction>>) -> Vec<Bl
 
 fn captured(wallet: WalletId, height: u32, value: u64, salt: u8) -> CapturedUtxo {
     let mut outpoint = OutPoint::null();
-    outpoint.vout = salt as u32;
+    outpoint.vout = u32::from(salt);
     CapturedUtxo {
         wallet_id: wallet,
         outpoint,
@@ -187,7 +188,7 @@ fn mem_utxo_store_upsert_then_list() {
         .list_unspent(w)
         .unwrap()
         .iter()
-        .map(|u| u.value())
+        .map(CapturedUtxo::value)
         .collect();
     vals.sort_unstable();
     assert_eq!(vals, vec![100, 200]);
@@ -257,7 +258,7 @@ fn mem_block_store_rollback_above() {
     let store = MemBlockStore::new();
     for height in 0..=5u32 {
         let mut bytes = [0u8; 32];
-        bytes[0] = height as u8;
+        bytes[0] = u8::try_from(height).unwrap();
         let h = BlockHash::from_byte_array(bytes);
         store.store_block(height, h, b"x").unwrap();
         store.set_synced_tip(SyncedTip { height, hash: h }).unwrap();

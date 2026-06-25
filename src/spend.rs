@@ -183,7 +183,7 @@ mod tests {
         }
     }
 
-    /// 2-of-3 federation + wollet from three SoftSigners.
+    /// 2-of-3 federation + wollet from three `SoftSigner`s.
     fn federation_and_wollet(
         seeds: [u8; 3],
         blinding: u8,
@@ -229,7 +229,7 @@ mod tests {
         }
     }
 
-    /// Build a CapturedUtxo whose txout actually pays our derived address at
+    /// Build a `CapturedUtxo` whose txout actually pays our derived address at
     /// `index`, so LWK + our enrichment see a consistent script.
     fn funding_utxo(
         wollet: &ElementsWollet,

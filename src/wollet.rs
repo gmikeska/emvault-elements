@@ -277,12 +277,12 @@ mod tests {
 
         let addr = w.address(Chain::External, 0).unwrap();
         let spk = addr.script_pubkey();
-        let our_sk = slip77_blinding_key(w.master_blinding_key(), &spk);
-        let our_pk = PublicKey::from_secret_key(&Secp256k1::new(), &our_sk);
+        let secret = slip77_blinding_key(w.master_blinding_key(), &spk);
+        let derived_pubkey = PublicKey::from_secret_key(&Secp256k1::new(), &secret);
 
         assert_eq!(
             addr.blinding_pubkey,
-            Some(our_pk),
+            Some(derived_pubkey),
             "LWK address blinding pubkey must equal our slip77-derived key"
         );
     }

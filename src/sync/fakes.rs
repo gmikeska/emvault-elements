@@ -212,7 +212,8 @@ impl ElementsChainSource for MockChainSource {
         if chain.is_empty() {
             return Err(SyncError::ChainSource("empty chain".into()));
         }
-        Ok((chain.len() - 1) as u32)
+        u32::try_from(chain.len() - 1)
+            .map_err(|_| SyncError::ChainSource("chain too long".into()))
     }
 
     fn block_hash(&self, height: u32) -> Result<BlockHash, SyncError> {

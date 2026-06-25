@@ -72,10 +72,10 @@ mod tests {
     #[test]
     fn validation_passes_on_empty_outputs() {
         let pset = minimal_pset();
-        let blinded = BlindedPset::new(pset);
         // Can't construct a BlindedPset from an empty PSET (NotBlinded),
         // so validate_blinding_raw should pass on the raw PSET with no
         // non-fee outputs.
+        assert!(BlindedPset::new(pset).is_err(), "empty PSET is not blinded");
         let raw = minimal_pset();
         validate_blinding_raw(&raw).expect("empty outputs should pass");
     }

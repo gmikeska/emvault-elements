@@ -37,7 +37,7 @@ pub struct SyncSummary {
 /// matched outputs; build it fresh each sync pass (cheap) so newly-revealed
 /// addresses are picked up via an extended gap.
 pub struct BlockScanEngine<'w> {
-    /// script_pubkey -> (owning wallet, chain, wildcard index)
+    /// `script_pubkey` -> (owning wallet, chain, wildcard index)
     index: HashMap<Script, (WalletId, Chain, u32)>,
     /// Registered wallets, for unblinding matched outputs.
     wollets: HashMap<WalletId, &'w ElementsWollet>,
@@ -105,7 +105,7 @@ impl<'w> BlockScanEngine<'w> {
                 if chain.block_hash(t.height)? == t.hash {
                     t.height + 1
                 } else {
-                    let ancestor = self.find_common_ancestor(chain, blocks, t.height)?;
+                    let ancestor = Self::find_common_ancestor(chain, blocks, t.height)?;
                     blocks.rollback_above(ancestor)?;
                     utxos.rollback_above(ancestor)?;
                     summary.reorg_to = Some(ancestor);
@@ -155,14 +155,12 @@ impl<'w> BlockScanEngine<'w> {
                         // An output may match a watched script yet be blinded
                         // with a key we don't hold (legacy/foreign change). We
                         // can't spend it, so skip rather than aborting the scan.
-                        let secrets = match wollet.unblind(txout) {
-                            Ok(s) => s,
-                            Err(_) => {
-                                summary.skipped_unblindable += 1;
-                                continue;
-                            }
+                        let Ok(secrets) = wollet.unblind(txout) else {
+                            summary.skipped_unblindable += 1;
+                            continue;
                         };
-                        let outpoint = OutPoint::new(txid, vout as u32);
+                        let vout = u32::try_from(vout).expect("vout fits in u32");
+                        let outpoint = OutPoint::new(txid, vout);
                         captured.push(CapturedUtxo {
                             wallet_id,
                             outpoint,
@@ -204,12 +202,7 @@ impl<'w> BlockScanEngine<'w> {
 
     /// Walk back from `from` to the highest height where the node's block hash
     /// matches the one we stored — the common ancestor of the reorg.
-    fn find_common_ancestor<CS, BS>(
-        &self,
-        chain: &CS,
-        blocks: &BS,
-        from: u32,
-    ) -> Result<u32, SyncError>
+    fn find_common_ancestor<CS, BS>(chain: &CS, blocks: &BS, from: u32) -> Result<u32, SyncError>
     where
         CS: ElementsChainSource,
         BS: BlockStore,
