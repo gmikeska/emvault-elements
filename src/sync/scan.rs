@@ -12,9 +12,7 @@ use lwk_wollet::Chain;
 use crate::error::SyncError;
 use crate::wollet::ElementsWollet;
 
-use super::{
-    BlockStore, CapturedUtxo, ElementsChainSource, SyncedTip, WalletId, WalletUtxoStore,
-};
+use super::{BlockStore, CapturedUtxo, ElementsChainSource, SyncedTip, WalletId, WalletUtxoStore};
 
 /// Summary of one [`BlockScanEngine::sync`] pass.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

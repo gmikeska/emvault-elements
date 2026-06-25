@@ -13,9 +13,7 @@ use elements::{Block, BlockHash, OutPoint, Transaction, Txid};
 
 use crate::error::SyncError;
 
-use super::{
-    BlockStore, CapturedUtxo, ElementsChainSource, SyncedTip, WalletId, WalletUtxoStore,
-};
+use super::{BlockStore, CapturedUtxo, ElementsChainSource, SyncedTip, WalletId, WalletUtxoStore};
 
 /// In-memory [`WalletUtxoStore`]. Keyed by outpoint; tracks spend height for
 /// reorg-correct rollback.

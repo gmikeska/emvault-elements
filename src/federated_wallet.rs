@@ -413,8 +413,7 @@ mod tests {
         let fw = fw.with_federation(fed2, h2).unwrap();
 
         // Identity is now carried by the blinding key + descriptor, not a name.
-        let blinding_keys: Vec<[u8; 32]> =
-            fw.wallet_handles().map(|h| h.blinding_key).collect();
+        let blinding_keys: Vec<[u8; 32]> = fw.wallet_handles().map(|h| h.blinding_key).collect();
         assert_eq!(blinding_keys, vec![[0xaa; 32], [0xbb; 32]]);
         assert_eq!(fw.wallet_handles().count(), 2);
     }

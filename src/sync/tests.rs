@@ -14,10 +14,10 @@ use elements::{
     Sequence, Transaction, TxIn, TxMerkleNode, TxOut, TxOutSecrets, TxOutWitness,
 };
 
+use crate::ElementsWalletHandle;
 use crate::descriptor::{CtDescriptorBuilder, CtKeyMode};
 use crate::network::ElementsNetwork;
 use crate::wollet::ElementsWollet;
-use crate::ElementsWalletHandle;
 use asterism_core::signer::Signer;
 use asterism_core::test_utils::MockSigner;
 use bitcoin::Network;
@@ -34,8 +34,7 @@ use super::{
 // ---------------------------------------------------------------------------
 
 fn test_asset() -> AssetId {
-    AssetId::from_str("0202020202020202020202020202020202020202020202020202020202020202")
-        .unwrap()
+    AssetId::from_str("0202020202020202020202020202020202020202020202020202020202020202").unwrap()
 }
 
 fn wid(n: u8) -> WalletId {
@@ -87,7 +86,10 @@ fn tx_paying(nonce: u8, outs: Vec<(Script, u64)>) -> Transaction {
             asset_issuance: Default::default(),
             witness: Default::default(),
         }],
-        output: outs.into_iter().map(|(s, v)| explicit_txout(s, v)).collect(),
+        output: outs
+            .into_iter()
+            .map(|(s, v)| explicit_txout(s, v))
+            .collect(),
     }
 }
 
@@ -107,7 +109,10 @@ fn tx_spending(inputs: Vec<OutPoint>, outs: Vec<(Script, u64)>) -> Transaction {
                 witness: Default::default(),
             })
             .collect(),
-        output: outs.into_iter().map(|(s, v)| explicit_txout(s, v)).collect(),
+        output: outs
+            .into_iter()
+            .map(|(s, v)| explicit_txout(s, v))
+            .collect(),
     }
 }
 
@@ -178,7 +183,12 @@ fn mem_utxo_store_upsert_then_list() {
     // idempotent: re-upsert same outpoints doesn't duplicate
     store.upsert_utxos(&[captured(w, 1, 100, 0)]).unwrap();
 
-    let mut vals: Vec<u64> = store.list_unspent(w).unwrap().iter().map(|u| u.value()).collect();
+    let mut vals: Vec<u64> = store
+        .list_unspent(w)
+        .unwrap()
+        .iter()
+        .map(|u| u.value())
+        .collect();
     vals.sort_unstable();
     assert_eq!(vals, vec![100, 200]);
     assert_eq!(store.len(), 2);
@@ -231,8 +241,13 @@ fn mem_block_store_cursor_and_hash_roundtrip() {
     assert!(store.synced_tip().unwrap().is_none());
     let h = BlockHash::all_zeros();
     store.store_block(3, h, b"rawblockbytes").unwrap();
-    store.set_synced_tip(SyncedTip { height: 3, hash: h }).unwrap();
-    assert_eq!(store.synced_tip().unwrap(), Some(SyncedTip { height: 3, hash: h }));
+    store
+        .set_synced_tip(SyncedTip { height: 3, hash: h })
+        .unwrap();
+    assert_eq!(
+        store.synced_tip().unwrap(),
+        Some(SyncedTip { height: 3, hash: h })
+    );
     assert_eq!(store.block_hash_at(3).unwrap(), Some(h));
     assert_eq!(store.block_hash_at(4).unwrap(), None);
 }
@@ -273,7 +288,10 @@ fn single_deposit_captured() {
 
     let spk = w.address(Chain::External, 0).unwrap().script_pubkey();
     let chain = MockChainSource::new();
-    build_chain(&chain, vec![vec![], vec![tx_paying(1, vec![(spk, 50_000)])]]);
+    build_chain(
+        &chain,
+        vec![vec![], vec![tx_paying(1, vec![(spk, 50_000)])]],
+    );
     let blocks = MemBlockStore::new();
     let utxos = MemUtxoStore::new();
 
@@ -283,7 +301,11 @@ fn single_deposit_captured() {
 
     let unspent = utxos.list_unspent(id).unwrap();
     assert_eq!(unspent.len(), 1);
-    assert_eq!(unspent[0].value(), 50_000, "explicit value recovered via unblind");
+    assert_eq!(
+        unspent[0].value(),
+        50_000,
+        "explicit value recovered via unblind"
+    );
     assert_eq!(blocks.block_count(), 2, "each block stored once");
     assert_eq!(blocks.synced_tip().unwrap().map(|t| t.height), Some(1));
 }
@@ -296,7 +318,10 @@ fn spend_marks_utxo_spent() {
     let spk = w.address(Chain::External, 0).unwrap().script_pubkey();
 
     let chain = MockChainSource::new();
-    build_chain(&chain, vec![vec![], vec![tx_paying(1, vec![(spk.clone(), 50_000)])]]);
+    build_chain(
+        &chain,
+        vec![vec![], vec![tx_paying(1, vec![(spk.clone(), 50_000)])]],
+    );
     let blocks = MemBlockStore::new();
     let utxos = MemUtxoStore::new();
     engine.sync(&chain, &blocks, &utxos).unwrap();
@@ -325,7 +350,10 @@ fn unwatched_output_ignored() {
 
     let foreign_spk = foreign.address(Chain::External, 0).unwrap().script_pubkey();
     let chain = MockChainSource::new();
-    build_chain(&chain, vec![vec![], vec![tx_paying(1, vec![(foreign_spk, 99_000)])]]);
+    build_chain(
+        &chain,
+        vec![vec![], vec![tx_paying(1, vec![(foreign_spk, 99_000)])]],
+    );
     let blocks = MemBlockStore::new();
     let utxos = MemUtxoStore::new();
 
@@ -347,7 +375,10 @@ fn multi_wallet_attribution() {
     // ONE block pays both wallets
     build_chain(
         &chain,
-        vec![vec![], vec![tx_paying(1, vec![(spk1, 11_000), (spk2, 22_000)])]],
+        vec![
+            vec![],
+            vec![tx_paying(1, vec![(spk1, 11_000), (spk2, 22_000)])],
+        ],
     );
     let blocks = MemBlockStore::new();
     let utxos = MemUtxoStore::new();
@@ -368,7 +399,10 @@ fn reorg_rolls_back_and_recaptures() {
 
     let chain = MockChainSource::new();
     // genesis, then height-1 deposits 70k to addr0
-    build_chain(&chain, vec![vec![], vec![tx_paying(1, vec![(spk0, 70_000)])]]);
+    build_chain(
+        &chain,
+        vec![vec![], vec![tx_paying(1, vec![(spk0, 70_000)])]],
+    );
     let blocks = MemBlockStore::new();
     let utxos = MemUtxoStore::new();
     engine.sync(&chain, &blocks, &utxos).unwrap();
@@ -377,7 +411,12 @@ fn reorg_rolls_back_and_recaptures() {
     // reorg: drop height 1, replace with a divergent block depositing 88k to addr1
     chain.reorg_to(0);
     let genesis = chain.block_hash(0).unwrap();
-    chain.push_block(block_at(1, genesis, vec![tx_paying(2, vec![(spk1, 88_000)])], 999));
+    chain.push_block(block_at(
+        1,
+        genesis,
+        vec![tx_paying(2, vec![(spk1, 88_000)])],
+        999,
+    ));
 
     let summary = engine.sync(&chain, &blocks, &utxos).unwrap();
     assert_eq!(summary.reorg_to, Some(0), "rolled back to common ancestor");
@@ -394,7 +433,10 @@ fn idempotent_resync() {
     let spk = w.address(Chain::External, 0).unwrap().script_pubkey();
 
     let chain = MockChainSource::new();
-    build_chain(&chain, vec![vec![], vec![tx_paying(1, vec![(spk, 50_000)])]]);
+    build_chain(
+        &chain,
+        vec![vec![], vec![tx_paying(1, vec![(spk, 50_000)])]],
+    );
     let blocks = MemBlockStore::new();
     let utxos = MemUtxoStore::new();
 

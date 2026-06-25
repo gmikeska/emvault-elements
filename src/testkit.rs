@@ -9,13 +9,13 @@
 
 use std::str::FromStr;
 
+use bitcoin::Network;
 use bitcoin::bip32::{DerivationPath, Fingerprint, Xpriv, Xpub};
 use bitcoin::secp256k1::Secp256k1;
-use bitcoin::Network;
 
+use elements::EcdsaSighashType;
 use elements::pset::PartiallySignedTransaction as Pset;
 use elements::sighash::SighashCache;
-use elements::EcdsaSighashType;
 use elements_miniscript::psbt::{PsbtExt, PsbtSighashMsg};
 
 use asterism_core::network::{ElementsNetworkId, NetworkType};

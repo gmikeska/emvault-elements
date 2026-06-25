@@ -151,11 +151,11 @@ fn finish_blinded(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ElementsWalletHandle;
     use crate::descriptor::{CtDescriptorBuilder, CtKeyMode};
     use crate::network::ElementsNetwork;
     use crate::pset::ElementsSigningCoordinator;
     use crate::sync::WalletId;
-    use crate::ElementsWalletHandle;
 
     use crate::testkit::SoftwareSigner as SoftSigner;
 
@@ -197,7 +197,8 @@ mod tests {
         }
         let desc = builder.build().unwrap();
         let handle = ElementsWalletHandle::new(desc.clone(), [blinding; 32]);
-        let wollet = ElementsWollet::from_handle(&handle, ElementsNetwork::ElementsRegtest).unwrap();
+        let wollet =
+            ElementsWollet::from_handle(&handle, ElementsNetwork::ElementsRegtest).unwrap();
         let fed = Federation::new(
             2,
             signers.clone(),
@@ -236,9 +237,7 @@ mod tests {
         value: u64,
         txid_seed: u8,
     ) -> CapturedUtxo {
-        let addr = wollet
-            .address(lwk_wollet::Chain::External, index)
-            .unwrap();
+        let addr = wollet.address(lwk_wollet::Chain::External, index).unwrap();
         let mut u = captured_lbtc(WalletId::from_bytes([1; 16]), index, value, txid_seed);
         u.txout = explicit_txout(addr.script_pubkey(), value);
         u
@@ -301,9 +300,13 @@ mod tests {
 
         let mut coordinator = ElementsSigningCoordinator::new(&fed, blinded).unwrap();
         // sign with two of three signers (threshold 2-of-3)
-        let signed0 = coordinator.sign_with(&signers[0], &signers[0].id()).unwrap();
+        let signed0 = coordinator
+            .sign_with(&signers[0], &signers[0].id())
+            .unwrap();
         assert!(signed0 >= 1, "signer 0 signed at least one input");
-        coordinator.sign_with(&signers[1], &signers[1].id()).unwrap();
+        coordinator
+            .sign_with(&signers[1], &signers[1].id())
+            .unwrap();
         assert!(coordinator.is_complete(), "2-of-3 threshold met");
 
         let finalized = coordinator.finalize().unwrap();

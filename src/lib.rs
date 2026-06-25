@@ -43,32 +43,32 @@ pub mod pset;
 pub mod signer;
 /// Spend-path construction: captured UTXOs → blinded, signable PSET.
 pub mod spend;
-/// Reusable test helpers ([`testkit::SoftwareSigner`]).
-#[cfg(any(test, feature = "test-utils"))]
-pub mod testkit;
 /// Shared block-scan pipeline: DB-agnostic stores, chain-source transport, and
 /// the [`sync::BlockScanEngine`].
 pub mod sync;
+/// Reusable test helpers ([`testkit::SoftwareSigner`]).
+#[cfg(any(test, feature = "test-utils"))]
+pub mod testkit;
 /// [`ElementsWollet`] — client-side wallet (address derivation, unblinding).
 pub mod wollet;
 
 pub use confidential::validate_blinding;
 pub use descriptor::{CtDescriptorBuilder, CtKeyMode};
 pub use error::{CtDescriptorError, PsetError, SpendError, SyncError, WolletError};
-pub use spend::{build_spend_pset, build_sweep_pset};
 pub use federated_wallet::{ElementsFederatedWallet, ElementsWalletHandle};
 pub use network::ElementsNetwork;
-pub use sync::{
-    BlockScanEngine, BlockStore, CapturedUtxo, ElementsChainSource, SyncedTip, WalletId,
-    WalletUtxoStore,
-};
-pub use wollet::ElementsWollet;
 pub use pset::{
     BlindedPset, ElementsSigningCoordinator, FinalizedPset, UnsignedPset, blind_pset,
     derive_input_secrets, explicit_txout_secrets, finalize_p2wsh_pset, slip77_blinding_key,
     unblind_input,
 };
 pub use signer::ElementsSigner;
+pub use spend::{build_spend_pset, build_sweep_pset};
+pub use sync::{
+    BlockScanEngine, BlockStore, CapturedUtxo, ElementsChainSource, SyncedTip, WalletId,
+    WalletUtxoStore,
+};
+pub use wollet::ElementsWollet;
 
 /// Re-export of [`elements_miniscript`] for downstream crates that need
 /// access to the confidential descriptor types or `secp256k1_zkp`.
