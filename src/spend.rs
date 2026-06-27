@@ -279,9 +279,9 @@ mod tests {
 
     use crate::signer::ElementsSigner;
 
-    use asterism_core::federation::Federation;
-    use asterism_core::network::{ElementsNetworkId, NetworkType};
-    use asterism_core::signer::Signer;
+    use emvault_core::federation::Federation;
+    use emvault_core::network::{ElementsNetworkId, NetworkType};
+    use emvault_core::signer::Signer;
     use elements::confidential::{Asset, AssetBlindingFactor, Nonce, Value, ValueBlindingFactor};
     use elements::{AssetId, OutPoint, Script, TxOut, TxOutSecrets, TxOutWitness};
 

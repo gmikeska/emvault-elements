@@ -1,4 +1,4 @@
-use asterism_core::network::{ElementsNetworkId, NetworkType};
+use emvault_core::network::{ElementsNetworkId, NetworkType};
 use elements::AddressParams;
 
 /// Elements/Liquid network with full parameters needed by LWK and address
@@ -63,7 +63,7 @@ impl ElementsNetwork {
     }
 
     /// Convert to the lightweight [`ElementsNetworkId`] carried by
-    /// `asterism-core`.
+    /// `emvault-core`.
     #[must_use]
     pub fn to_core_id(self) -> ElementsNetworkId {
         match self {

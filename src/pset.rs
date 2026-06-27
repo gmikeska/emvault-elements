@@ -1,6 +1,6 @@
 //! PSET pipeline: blinding, signing coordination, finalization.
 //!
-//! The Elements PSET pipeline mirrors [`asterism_core::psbt`] but adds an
+//! The Elements PSET pipeline mirrors [`emvault_core::psbt`] but adds an
 //! Elements-specific blinding stage between construction and signing:
 //!
 //! 1. **Construction** — done outside this crate (e.g., via Elements RPC
@@ -27,8 +27,8 @@ use elements::pset::PartiallySignedTransaction as Pset;
 use elements::secp256k1_zkp::{self, Secp256k1};
 use elements::{Script, TxOutSecrets};
 
-use asterism_core::federation::Federation;
-use asterism_core::signer::{Signer, SignerId};
+use emvault_core::federation::Federation;
+use emvault_core::signer::{Signer, SignerId};
 
 use crate::error::PsetError;
 use crate::signer::ElementsSigner;

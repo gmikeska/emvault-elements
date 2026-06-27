@@ -12,10 +12,10 @@ use std::collections::HashSet;
 use elements_miniscript::confidential::Descriptor as ConfidentialDescriptor;
 use elements_miniscript::descriptor::DescriptorPublicKey;
 
-use asterism_core::error::FederatedWalletError;
-use asterism_core::federated_wallet::{FederatedWallet, FederationWallet};
-use asterism_core::network::NetworkType;
-use asterism_core::signer::{Signer, SignerId};
+use emvault_core::error::FederatedWalletError;
+use emvault_core::federated_wallet::{FederatedWallet, FederationWallet};
+use emvault_core::network::NetworkType;
+use emvault_core::signer::{Signer, SignerId};
 
 use crate::network::ElementsNetwork;
 
@@ -64,7 +64,7 @@ impl ElementsWalletHandle {
 /// Elements implementation of [`FederatedWallet`], backed by per-federation
 /// [`ElementsWalletHandle`] instances referencing named daemon wallets.
 ///
-/// Like [`BtcFederatedWallet`](asterism_core::BtcFederatedWallet), this type
+/// Like [`BtcFederatedWallet`](emvault_core::BtcFederatedWallet), this type
 /// is **immutable** — [`with_federation`](Self::with_federation) returns a
 /// new instance; the original is unchanged.
 pub struct ElementsFederatedWallet<S: Signer = Box<dyn Signer>> {
@@ -90,7 +90,7 @@ impl<S: Signer> ElementsFederatedWallet<S> {
     /// Returns [`FederatedWalletError::NonElementsNetwork`] if the federation's
     /// network is not an Elements network.
     pub fn new(
-        federation: asterism_core::federation::Federation<S>,
+        federation: emvault_core::federation::Federation<S>,
         handle: ElementsWalletHandle,
         network: ElementsNetwork,
     ) -> Result<Self, FederatedWalletError> {
@@ -119,7 +119,7 @@ impl<S: Signer> ElementsFederatedWallet<S> {
     ///   Elements.
     pub fn with_federation(
         &self,
-        federation: asterism_core::federation::Federation<S>,
+        federation: emvault_core::federation::Federation<S>,
         handle: ElementsWalletHandle,
     ) -> Result<Self, FederatedWalletError>
     where
@@ -233,7 +233,7 @@ impl<S: Signer> FederatedWallet<S, ElementsWalletHandle> for ElementsFederatedWa
                 fw.federation
                     .signers()
                     .iter()
-                    .map(asterism_core::Signer::id)
+                    .map(emvault_core::Signer::id)
             })
             .collect()
     }
@@ -243,7 +243,7 @@ impl<S: Signer> FederatedWallet<S, ElementsWalletHandle> for ElementsFederatedWa
             .federation
             .signers()
             .iter()
-            .map(asterism_core::Signer::id)
+            .map(emvault_core::Signer::id)
             .collect()
     }
 }
@@ -251,9 +251,9 @@ impl<S: Signer> FederatedWallet<S, ElementsWalletHandle> for ElementsFederatedWa
 #[cfg(test)]
 mod tests {
     use super::*;
-    use asterism_core::federation::Federation;
-    use asterism_core::network::ElementsNetworkId;
-    use asterism_core::signer::{SignerCapabilities, SignerHealth, SignerType, TransportType};
+    use emvault_core::federation::Federation;
+    use emvault_core::network::ElementsNetworkId;
+    use emvault_core::signer::{SignerCapabilities, SignerHealth, SignerType, TransportType};
     use bitcoin::Network;
     use bitcoin::bip32::{DerivationPath, Fingerprint, Xpub};
     use std::str::FromStr;
@@ -313,7 +313,7 @@ mod tests {
         fn capabilities(&self) -> SignerCapabilities {
             SignerCapabilities::p2wsh_only(vec![TransportType::Usb])
         }
-        fn health_check(&self) -> Result<SignerHealth, asterism_core::error::SignerError> {
+        fn health_check(&self) -> Result<SignerHealth, emvault_core::error::SignerError> {
             Ok(SignerHealth {
                 reachable: true,
                 firmware_version: None,
@@ -499,7 +499,7 @@ mod tests {
 
     #[test]
     fn non_elements_network_rejected() {
-        use asterism_core::test_utils::MockSigner;
+        use emvault_core::test_utils::MockSigner;
         let signers: Vec<MockSigner> = (1..=3)
             .map(|s| MockSigner::with_seed(s, Network::Regtest))
             .collect();

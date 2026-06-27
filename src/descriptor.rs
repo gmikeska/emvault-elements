@@ -5,7 +5,7 @@ use bitcoin::bip32::{ChildNumber, DerivationPath, Fingerprint, Xpub};
 use elements_miniscript::confidential::Descriptor as ConfidentialDescriptor;
 use elements_miniscript::descriptor::DescriptorPublicKey;
 
-use asterism_core::signer::{Signer, SignerId};
+use emvault_core::signer::{Signer, SignerId};
 
 use crate::error::CtDescriptorError;
 
@@ -170,7 +170,7 @@ mod hex {
 
 /// Convert a confidential descriptor into a BIP-389-style multipath string
 /// by replacing `/0/*` with `/<0;1>/*`, analogous to
-/// [`asterism_core::descriptor::to_multipath_string`].
+/// [`emvault_core::descriptor::to_multipath_string`].
 ///
 /// Strips the `#checksum` suffix (if present) before substitution so
 /// downstream parsers compute a fresh checksum over the multipath body.
@@ -186,8 +186,8 @@ mod tests {
     use bitcoin::Network;
     use bitcoin::bip32::Xpub;
 
-    use asterism_core::network::NetworkType;
-    use asterism_core::signer::{
+    use emvault_core::network::NetworkType;
+    use emvault_core::signer::{
         SignerCapabilities, SignerHealth, SignerId, SignerType, TransportType,
     };
 
@@ -246,7 +246,7 @@ mod tests {
         fn capabilities(&self) -> SignerCapabilities {
             SignerCapabilities::p2wsh_only(vec![TransportType::Usb])
         }
-        fn health_check(&self) -> Result<SignerHealth, asterism_core::error::SignerError> {
+        fn health_check(&self) -> Result<SignerHealth, emvault_core::error::SignerError> {
             Ok(SignerHealth {
                 reachable: true,
                 firmware_version: None,

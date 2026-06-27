@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use asterism_core::signer::SignerId;
+use emvault_core::signer::SignerId;
 
 /// Errors from PSET pipeline operations (signing, blinding, finalization).
 #[derive(Debug, Error)]

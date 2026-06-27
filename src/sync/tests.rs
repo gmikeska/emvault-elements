@@ -19,8 +19,8 @@ use crate::ElementsWalletHandle;
 use crate::descriptor::{CtDescriptorBuilder, CtKeyMode};
 use crate::network::ElementsNetwork;
 use crate::wollet::ElementsWollet;
-use asterism_core::signer::Signer;
-use asterism_core::test_utils::MockSigner;
+use emvault_core::signer::Signer;
+use emvault_core::test_utils::MockSigner;
 use bitcoin::Network;
 use lwk_wollet::Chain;
 

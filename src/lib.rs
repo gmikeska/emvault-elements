@@ -1,22 +1,22 @@
-//! # asterism-elements
+//! # emvault-elements
 //!
 //! Elements/Liquid support for the Emerald multi-signature custody platform.
 //!
-//! This companion crate to [`asterism-core`] provides:
+//! This companion crate to [`emvault-core`] provides:
 //!
 //! - [`ElementsNetwork`] — network enum with LWK and address parameters.
 //! - [`CtDescriptorBuilder`] — builds `ct(slip77(...), elwsh(sortedmulti(...)))`
-//!   confidential descriptors from [`asterism_core::Signer`] instances.
+//!   confidential descriptors from [`emvault_core::Signer`] instances.
 //! - [`ElementsSigner`] — trait for signers that can produce ECDSA partial
 //!   signatures over Elements PSET inputs.
 //! - [`pset`] — PSET pipeline: blinding, signing coordination, and
-//!   finalization (mirrors [`asterism_core::psbt`] with an Elements-specific
+//!   finalization (mirrors [`emvault_core::psbt`] with an Elements-specific
 //!   blinding stage).
 //! - [`error`] — error types for PSET signing and descriptor construction.
 //! - [`wollet`] — [`ElementsWollet`], a client-side wallet wrapping
 //!   `lwk_wollet::Wollet` for address derivation and unblinding.
 //!
-//! Unlike `asterism-core`, this crate is intentionally "thicker": because the
+//! Unlike `emvault-core`, this crate is intentionally "thicker": because the
 //! Elements daemon-wallet model does not scale, Elements UTXO capture is done
 //! client-side here. The [`wollet`] module owns descriptor-driven derivation
 //! and unblinding; the shared block-scan pipeline (forthcoming [`sync`]) drives

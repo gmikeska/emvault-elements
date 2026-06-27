@@ -1,11 +1,11 @@
 //! Reusable test helpers, gated behind `cfg(test)` or the `test-utils` feature.
 //!
 //! [`SoftwareSigner`] is a self-contained in-process signer that owns its
-//! master key: it implements both [`asterism_core::signer::Signer`] (so it can
+//! master key: it implements both [`emvault_core::signer::Signer`] (so it can
 //! build federations/descriptors) and [`crate::signer::ElementsSigner`] (so it
 //! can produce real ECDSA signatures over the Elements segwit-v0 sighash). This
 //! is exactly what a production HSM does, made available for offline and
-//! node-backed tests without depending on `asterism-pkcs11`.
+//! node-backed tests without depending on `emvault-pkcs11`.
 
 use std::str::FromStr;
 
@@ -18,8 +18,8 @@ use elements::pset::PartiallySignedTransaction as Pset;
 use elements::sighash::SighashCache;
 use elements_miniscript::psbt::{PsbtExt, PsbtSighashMsg};
 
-use asterism_core::network::{ElementsNetworkId, NetworkType};
-use asterism_core::signer::{
+use emvault_core::network::{ElementsNetworkId, NetworkType};
+use emvault_core::signer::{
     Signer, SignerCapabilities, SignerHealth, SignerId, SignerType, TransportType,
 };
 
@@ -107,7 +107,7 @@ impl Signer for SoftwareSigner {
     fn capabilities(&self) -> SignerCapabilities {
         SignerCapabilities::p2wsh_only(vec![TransportType::Usb])
     }
-    fn health_check(&self) -> Result<SignerHealth, asterism_core::error::SignerError> {
+    fn health_check(&self) -> Result<SignerHealth, emvault_core::error::SignerError> {
         Ok(SignerHealth {
             reachable: true,
             firmware_version: None,

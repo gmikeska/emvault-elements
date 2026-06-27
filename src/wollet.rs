@@ -212,9 +212,9 @@ mod tests {
     use super::*;
     use crate::descriptor::CtDescriptorBuilder;
     use crate::slip77_blinding_key;
-    use asterism_core::network::ElementsNetworkId;
-    use asterism_core::signer::Signer;
-    use asterism_core::test_utils::MockSigner;
+    use emvault_core::network::ElementsNetworkId;
+    use emvault_core::signer::Signer;
+    use emvault_core::test_utils::MockSigner;
     use bitcoin::Network;
     use elements::secp256k1_zkp::{PublicKey, Secp256k1};
 
@@ -236,8 +236,8 @@ mod tests {
         let w = ElementsWollet::from_handle(&handle, ElementsNetwork::ElementsRegtest).unwrap();
         assert_eq!(w.network(), ElementsNetwork::ElementsRegtest);
         assert!(matches!(
-            asterism_core::network::NetworkType::from(w.network()),
-            asterism_core::network::NetworkType::Elements(ElementsNetworkId::ElementsRegtest)
+            emvault_core::network::NetworkType::from(w.network()),
+            emvault_core::network::NetworkType::Elements(ElementsNetworkId::ElementsRegtest)
         ));
     }
 
