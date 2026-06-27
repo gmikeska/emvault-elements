@@ -13,10 +13,13 @@ test-utils = []
 [dependencies]
 asterism-core = { version = "0.1.0", path = "../asterism-core", features = ["elements"] }
 bitcoin = "0.32.10"
+bitcoincore-rpc = "0.19"
 elements = { version = "0.25", features = ["serde"] }
 elements-miniscript = { version = "0.4", features = ["serde"] }
 lwk_wollet = { version = "0.18.1", default-features = false }
 lwk_common = { version = "0.18.1", default-features = false }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
 thiserror = "2.0.18"
 
 [dev-dependencies]

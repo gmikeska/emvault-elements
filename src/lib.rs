@@ -39,6 +39,9 @@ pub mod federated_wallet;
 pub mod network;
 /// PSET pipeline: blinding, signing coordination, finalization.
 pub mod pset;
+/// [`rpc::ElementsRpc`] — thin `bitcoincore_rpc` wrapper for the Elements
+/// daemon's CT-aware JSON-RPC calls.
+pub mod rpc;
 /// The [`ElementsSigner`] trait for PSET signing.
 pub mod signer;
 /// Spend-path construction: captured UTXOs → blinded, signable PSET.
@@ -57,6 +60,10 @@ pub use descriptor::{CtDescriptorBuilder, CtKeyMode};
 pub use error::{CtDescriptorError, PsetError, SpendError, SyncError, WolletError};
 pub use federated_wallet::{ElementsFederatedWallet, ElementsWalletHandle};
 pub use network::ElementsNetwork;
+pub use rpc::{
+    DescriptorInfo, ElementsBalances, ElementsRpc, ElementsRpcError, ElementsUtxo, FundedPsbt,
+    ImportDescriptorError, ImportDescriptorRequest, ImportDescriptorResult, WalletTransaction,
+};
 pub use pset::{
     BlindedPset, ElementsSigningCoordinator, FinalizedPset, UnsignedPset, blind_pset,
     derive_input_secrets, explicit_txout_secrets, finalize_p2wsh_pset, slip77_blinding_key,
