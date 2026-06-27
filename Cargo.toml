@@ -2,7 +2,7 @@
 name = "emvault-elements"
 version = "0.1.0"
 edition = "2024"
-description = "Elements/Liquid support for the Emerald multi-signature custody platform: confidential descriptor builder, ElementsSigner trait, and network types."
+description = "Elements/Liquid support for the EmVault multi-signature custody platform: confidential descriptor builder, ElementsSigner trait, and network types."
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/gmikeska/emvault-elements"
 
