@@ -60,14 +60,14 @@ pub use descriptor::{CtDescriptorBuilder, CtKeyMode};
 pub use error::{CtDescriptorError, PsetError, SpendError, SyncError, WolletError};
 pub use federated_wallet::{ElementsFederatedWallet, ElementsWalletHandle};
 pub use network::ElementsNetwork;
-pub use rpc::{
-    DescriptorInfo, ElementsBalances, ElementsRpc, ElementsRpcError, ElementsUtxo, FundedPsbt,
-    ImportDescriptorError, ImportDescriptorRequest, ImportDescriptorResult, WalletTransaction,
-};
 pub use pset::{
     BlindedPset, ElementsSigningCoordinator, FinalizedPset, UnsignedPset, blind_pset,
     derive_input_secrets, explicit_txout_secrets, finalize_p2wsh_pset, slip77_blinding_key,
     unblind_input,
+};
+pub use rpc::{
+    DescriptorInfo, ElementsBalances, ElementsRpc, ElementsRpcError, ElementsUtxo, FundedPsbt,
+    ImportDescriptorError, ImportDescriptorRequest, ImportDescriptorResult, WalletTransaction,
 };
 pub use signer::ElementsSigner;
 pub use spend::{build_migration_pset, build_spend_pset, build_sweep_pset, captured_from_output};
