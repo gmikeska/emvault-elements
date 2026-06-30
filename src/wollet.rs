@@ -212,11 +212,11 @@ mod tests {
     use super::*;
     use crate::descriptor::CtDescriptorBuilder;
     use crate::slip77_blinding_key;
+    use bitcoin::Network;
+    use elements::secp256k1_zkp::{PublicKey, Secp256k1};
     use emvault_core::network::ElementsNetworkId;
     use emvault_core::signer::Signer;
     use emvault_core::test_utils::MockSigner;
-    use bitcoin::Network;
-    use elements::secp256k1_zkp::{PublicKey, Secp256k1};
 
     /// Build a 2-of-3 ranged handle from deterministic mock signers.
     fn make_handle(blinding_key: [u8; 32]) -> ElementsWalletHandle {

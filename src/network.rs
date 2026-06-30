@@ -1,5 +1,5 @@
-use emvault_core::network::{ElementsNetworkId, NetworkType};
 use elements::AddressParams;
+use emvault_core::network::{ElementsNetworkId, NetworkType};
 
 /// Elements/Liquid network with full parameters needed by LWK and address
 /// derivation.

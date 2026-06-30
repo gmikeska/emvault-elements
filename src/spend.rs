@@ -279,11 +279,11 @@ mod tests {
 
     use crate::signer::ElementsSigner;
 
+    use elements::confidential::{Asset, AssetBlindingFactor, Nonce, Value, ValueBlindingFactor};
+    use elements::{AssetId, OutPoint, Script, TxOut, TxOutSecrets, TxOutWitness};
     use emvault_core::federation::Federation;
     use emvault_core::network::{ElementsNetworkId, NetworkType};
     use emvault_core::signer::Signer;
-    use elements::confidential::{Asset, AssetBlindingFactor, Nonce, Value, ValueBlindingFactor};
-    use elements::{AssetId, OutPoint, Script, TxOut, TxOutSecrets, TxOutWitness};
 
     fn soft(seed: u8) -> SoftSigner {
         SoftSigner::new(seed, ElementsNetwork::ElementsRegtest)

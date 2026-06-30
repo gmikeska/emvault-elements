@@ -229,12 +229,7 @@ impl<S: Signer> FederatedWallet<S, ElementsWalletHandle> for ElementsFederatedWa
     fn all_signer_ids(&self) -> HashSet<SignerId> {
         self.federation_wallets
             .iter()
-            .flat_map(|fw| {
-                fw.federation
-                    .signers()
-                    .iter()
-                    .map(emvault_core::Signer::id)
-            })
+            .flat_map(|fw| fw.federation.signers().iter().map(emvault_core::Signer::id))
             .collect()
     }
 
@@ -251,11 +246,11 @@ impl<S: Signer> FederatedWallet<S, ElementsWalletHandle> for ElementsFederatedWa
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bitcoin::Network;
+    use bitcoin::bip32::{DerivationPath, Fingerprint, Xpub};
     use emvault_core::federation::Federation;
     use emvault_core::network::ElementsNetworkId;
     use emvault_core::signer::{SignerCapabilities, SignerHealth, SignerType, TransportType};
-    use bitcoin::Network;
-    use bitcoin::bip32::{DerivationPath, Fingerprint, Xpub};
     use std::str::FromStr;
 
     #[derive(Clone)]

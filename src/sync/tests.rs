@@ -19,9 +19,9 @@ use crate::ElementsWalletHandle;
 use crate::descriptor::{CtDescriptorBuilder, CtKeyMode};
 use crate::network::ElementsNetwork;
 use crate::wollet::ElementsWollet;
+use bitcoin::Network;
 use emvault_core::signer::Signer;
 use emvault_core::test_utils::MockSigner;
-use bitcoin::Network;
 use lwk_wollet::Chain;
 
 use super::fakes::{MemBlockStore, MemUtxoStore, MockChainSource};
