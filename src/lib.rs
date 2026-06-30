@@ -77,9 +77,19 @@ pub use sync::{
 };
 pub use wollet::ElementsWollet;
 
+// ── Canonical Elements stack ─────────────────────────────────────────────────
+// Same contract as emvault-core's chain-stack re-exports: these are the third-
+// party crates whose types cross the Elements public API. Consume them via
+// `emvault::elements::{elements, elements_miniscript, lwk_wollet}` rather than
+// pinning them in the app.
+/// Re-export of the [`elements`] crate (Elements `Block`/`Txid`/PSET, CT types).
+pub use elements;
 /// Re-export of [`elements_miniscript`] for downstream crates that need
 /// access to the confidential descriptor types or `secp256k1_zkp`.
 pub use elements_miniscript;
+/// Re-export of [`lwk_wollet`] (`Wollet`, `WolletDescriptor`, `Chain`, the LWK
+/// scan/blinding model). [`LwkNetwork`] aliases its `Network` for convenience.
+pub use lwk_wollet;
 
 /// Re-export of LWK's `Network` type, returned by [`ElementsNetwork::to_lwk`]
 /// and [`ElementsNetwork::custom_regtest`].
