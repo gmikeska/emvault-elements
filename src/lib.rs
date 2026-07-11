@@ -1,6 +1,6 @@
 //! # emvault-elements
 //!
-//! Elements/Liquid support for the Emerald multi-signature custody platform.
+//! Elements/Liquid support for the EmVault multi-signature custody platform.
 //!
 //! This companion crate to [`emvault-core`] provides:
 //!

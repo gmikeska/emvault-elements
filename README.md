@@ -1,6 +1,6 @@
 # emvault-elements
 
-Elements/Liquid support for the Emerald multi-signature custody platform.
+Elements/Liquid support for the EmVault multi-signature custody platform.
 
 `emvault-elements` is the confidential-transaction (CT) companion to
 [`emvault-core`](https://github.com/gmikeska/emvault-core). Where
@@ -49,7 +49,7 @@ HSM backend when `emvault-pkcs11` is built with its `elements` feature.
 
 | Feature | Default | Effect |
 | ------- | ------- | ------ |
-| `test-utils` | off | Exposes the in-memory sync fakes (`MemBlockStore`, `MemUtxoStore`, `MockChainSource`) for downstream test suites. |
+| `test-utils` | off | Exposes the in-memory sync fakes (`MemBlockStore`, `MemUtxoStore`, `MockChainSource`) and `testkit::SoftwareSigner` for downstream test suites. |
 
 ## Build and test
 
