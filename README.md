@@ -2,6 +2,8 @@
 
 Elements/Liquid support for the EmVault multi-signature custody platform.
 
+See the [CHANGELOG](https://github.com/gmikeska/emvault-elements/blob/master/CHANGELOG.md) for release notes.
+
 `emvault-elements` is the confidential-transaction (CT) companion to
 [`emvault-core`](https://github.com/gmikeska/emvault-core). Where
 `emvault-core` covers Bitcoin federations, this crate adds the Elements/Liquid
