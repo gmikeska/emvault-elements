@@ -1,0 +1,7 @@
+# Domain-specific terms that clippy::doc_markdown shouldn't flag. These are
+# either acronyms/standards or vendor/product names that don't need backticks
+# in prose documentation.
+doc-valid-idents = [
+    "..",
+    "EmVault",
+]
