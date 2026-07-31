@@ -42,6 +42,12 @@ use crate::error::SyncError;
 use crate::sync::{CapturedUtxo, SyncedTip, WalletId, WalletUtxoStore};
 use crate::wollet::ElementsWollet;
 
+/// Re-exported from LWK: selects how the authenticated Esplora/Waterfalls
+/// constructors obtain a bearer token (`None`, a `Static` token, or the
+/// `Blockstream` OAuth `client_credentials` flow).
+#[cfg(feature = "esplora")]
+pub use lwk_wollet::clients::TokenProvider;
+
 /// Per-wallet persistence for the sparse reorg-detection checkpoint map.
 ///
 /// Implementations store a small set of `(height, hash)` synced-tip
@@ -334,6 +340,27 @@ impl NodelessSync<lwk_wollet::blocking::EsploraClient> {
         Ok(Self::from_client(client))
     }
 
+    /// Connect to an **authenticated** Esplora endpoint (e.g. Blockstream
+    /// enterprise / `QuickSync`), attaching a bearer token to every request via
+    /// the supplied [`TokenProvider`]. LWK fetches the token (for the
+    /// `Blockstream` provider, via the OAuth `client_credentials` grant) and
+    /// refreshes it automatically on `401`.
+    ///
+    /// # Errors
+    ///
+    /// [`SyncError::Backend`] if the client cannot be constructed.
+    pub fn new_esplora_authenticated(
+        url: &str,
+        network: lwk_wollet::Network,
+        token: TokenProvider,
+    ) -> Result<Self, SyncError> {
+        let client = lwk_wollet::clients::EsploraClientBuilder::new(url, network)
+            .token_provider(token)
+            .build_blocking()
+            .map_err(|e| SyncError::Backend(e.to_string()))?;
+        Ok(Self::from_client(client))
+    }
+
     /// Connect to an Esplora endpoint that supports the **Waterfalls**
     /// descriptor route (one query per descriptor). Always compatible with
     /// emvault's `slip77` confidential descriptors.
@@ -343,6 +370,26 @@ impl NodelessSync<lwk_wollet::blocking::EsploraClient> {
     /// [`SyncError::Backend`] if the client cannot be constructed.
     pub fn new_waterfalls(url: &str, network: lwk_wollet::Network) -> Result<Self, SyncError> {
         let client = lwk_wollet::blocking::EsploraClient::new_waterfalls(url, network)
+            .map_err(|e| SyncError::Backend(e.to_string()))?;
+        Ok(Self::from_client(client))
+    }
+
+    /// Connect to an **authenticated** Waterfalls Esplora endpoint. Same auth
+    /// behaviour as [`Self::new_esplora_authenticated`], but using the
+    /// descriptor-scan (Waterfalls/QuickSync) route.
+    ///
+    /// # Errors
+    ///
+    /// [`SyncError::Backend`] if the client cannot be constructed.
+    pub fn new_waterfalls_authenticated(
+        url: &str,
+        network: lwk_wollet::Network,
+        token: TokenProvider,
+    ) -> Result<Self, SyncError> {
+        let client = lwk_wollet::clients::EsploraClientBuilder::new(url, network)
+            .waterfalls(true)
+            .token_provider(token)
+            .build_blocking()
             .map_err(|e| SyncError::Backend(e.to_string()))?;
         Ok(Self::from_client(client))
     }

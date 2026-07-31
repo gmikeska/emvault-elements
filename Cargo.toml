@@ -33,3 +33,4 @@ thiserror = "2.0.18"
 
 [dev-dependencies]
 emvault-core = { version = "0.6.0", path = "../emvault-core", features = ["elements", "test-utils"] }
+serde_json = "1.0.150"
