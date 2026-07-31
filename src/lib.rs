@@ -37,6 +37,11 @@ pub mod error;
 pub mod federated_wallet;
 /// Elements/Liquid network types.
 pub mod network;
+/// Nodeless (Electrum / Esplora / Waterfalls) chain backends built on LWK's
+/// blockchain clients. Opt-in via the `electrum` / `esplora` features; the RPC
+/// block-scan pipeline ([`sync`]) is the default and is unaffected when off.
+#[cfg(any(feature = "electrum", feature = "esplora"))]
+pub mod nodeless;
 /// PSET pipeline: blinding, signing coordination, finalization.
 pub mod pset;
 /// [`rpc::ElementsRpc`] — thin `bitcoincore_rpc` wrapper for the Elements
@@ -60,6 +65,8 @@ pub use descriptor::{CtDescriptorBuilder, CtKeyMode};
 pub use error::{CtDescriptorError, PsetError, SpendError, SyncError, WolletError};
 pub use federated_wallet::{ElementsFederatedWallet, ElementsWalletHandle};
 pub use network::ElementsNetwork;
+#[cfg(any(feature = "electrum", feature = "esplora"))]
+pub use nodeless::{CheckpointStore, NodelessSync, NodelessSyncOutcome};
 pub use pset::{
     BlindedPset, ElementsSigningCoordinator, FinalizedPset, UnsignedPset, blind_pset,
     derive_input_secrets, explicit_txout_secrets, finalize_p2wsh_pset, slip77_blinding_key,

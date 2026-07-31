@@ -11,6 +11,14 @@ repository = "https://github.com/gmikeska/emvault-elements"
 # MockChainSource) for downstream test suites.
 test-utils = []
 
+# Nodeless (descriptor-private) Elements chain backends, built on LWK's
+# blockchain clients. RPC block-scan (the default) is unaffected when these are
+# off. `esplora` covers both plain Esplora and the Waterfalls descriptor
+# endpoint (same client, `new_waterfalls` constructor).
+electrum = ["lwk_wollet/electrum"]
+esplora = ["lwk_wollet/esplora"]
+nodeless = ["electrum", "esplora"]
+
 [dependencies]
 emvault-core = { version = "0.6.0", path = "../emvault-core", features = ["elements"] }
 bitcoin = "0.32.10"

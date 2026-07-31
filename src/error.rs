@@ -113,6 +113,11 @@ pub enum SyncError {
     #[error("chain source error: {0}")]
     ChainSource(String),
 
+    /// A nodeless chain backend ([`crate::nodeless`]) — an LWK Electrum,
+    /// Esplora, or Waterfalls client — returned an error.
+    #[error("chain backend error: {0}")]
+    Backend(String),
+
     /// Consensus (de)serialization of a block or transaction failed.
     #[error("encoding error: {0}")]
     Encoding(String),

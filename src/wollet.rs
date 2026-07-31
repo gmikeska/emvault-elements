@@ -194,6 +194,16 @@ impl ElementsWollet {
     pub fn inner(&self) -> &Wollet {
         &self.inner
     }
+
+    /// Mutable access to the wrapped `lwk_wollet::Wollet`.
+    ///
+    /// Required by the nodeless sync path ([`crate::nodeless`]) to apply an LWK
+    /// `Update` (`Wollet::apply_update`) after a scan. The block-scan pipeline
+    /// does not need this; it drives capture through [`Self::watched_scripts`]
+    /// and [`Self::unblind`] instead.
+    pub fn inner_mut(&mut self) -> &mut Wollet {
+        &mut self.inner
+    }
 }
 
 /// Lowercase-hex encode a 32-byte array (no external dependency).
