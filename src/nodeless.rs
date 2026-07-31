@@ -42,21 +42,24 @@ use crate::error::SyncError;
 use crate::sync::{CapturedUtxo, SyncedTip, WalletId, WalletUtxoStore};
 use crate::wollet::ElementsWollet;
 
-/// Persistence for the sparse reorg-detection checkpoint map.
+/// Per-wallet persistence for the sparse reorg-detection checkpoint map.
 ///
 /// Implementations store a small set of `(height, hash)` synced-tip
-/// checkpoints. The set may be pruned aggressively — only enough depth to cover
-/// the deepest reorg worth detecting is needed (Liquid's federated chain barely
-/// reorgs; regtest reorgs in tests are shallow).
+/// checkpoints **per wallet**. The set may be pruned aggressively — only enough
+/// depth to cover the deepest reorg worth detecting is needed (Liquid's
+/// federated chain barely reorgs; regtest reorgs in tests are shallow).
+///
+/// Keying by wallet keeps each wallet's `reorg_to` signal accurate when one
+/// client scans many wallets in a pass (the nodeless ingest model).
 pub trait CheckpointStore {
-    /// All stored checkpoints, in any order.
-    fn load(&self) -> Result<Vec<SyncedTip>, SyncError>;
+    /// All stored checkpoints for `wallet`, in any order.
+    fn load(&self, wallet: WalletId) -> Result<Vec<SyncedTip>, SyncError>;
 
-    /// Persist (insert or replace) a checkpoint for its height.
-    fn save(&self, tip: SyncedTip) -> Result<(), SyncError>;
+    /// Persist (insert or replace) a checkpoint for `wallet` at its height.
+    fn save(&self, wallet: WalletId, tip: SyncedTip) -> Result<(), SyncError>;
 
-    /// Drop checkpoints strictly above `height` (reorg rollback).
-    fn rollback_above(&self, height: u32) -> Result<(), SyncError>;
+    /// Drop `wallet`'s checkpoints strictly above `height` (reorg rollback).
+    fn rollback_above(&self, wallet: WalletId, height: u32) -> Result<(), SyncError>;
 }
 
 /// Outcome of a nodeless [`NodelessSync::sync`].
@@ -78,84 +81,102 @@ pub struct NodelessSyncOutcome {
 /// [`NodelessSync::new_esplora`], or [`NodelessSync::new_waterfalls`].
 pub struct NodelessSync<B: BlockchainBackend> {
     client: B,
-    wallet_id: WalletId,
 }
 
 impl<B: BlockchainBackend> NodelessSync<B> {
-    /// Wrap an already-constructed LWK client.
-    pub fn from_client(client: B, wallet_id: WalletId) -> Self {
-        Self { client, wallet_id }
+    /// Wrap an already-constructed LWK client. The same client (one connection)
+    /// serves every wallet in an ingest pass; `wallet_id` is supplied per
+    /// [`sync`](Self::sync) call.
+    pub fn from_client(client: B) -> Self {
+        Self { client }
     }
 
-    /// Scan, reconcile reorgs, and project LWK's authoritative UTXO set into the
-    /// caller's stores.
+    /// Scan every federation-version wollet of `wallet_id`, reconcile reorgs,
+    /// and project LWK's authoritative UTXO set into the caller's stores.
     ///
-    /// Steps: (1) `full_scan` + `apply_update` (LWK unblinds and reconciles
-    /// internally); (2) read the new tip; (3) checkpoint-compare to find any
-    /// reorg common ancestor; (4) on reorg, `rollback_above` both stores; (5)
-    /// upsert the authoritative unspent set; (6) mark outpoints that left the
-    /// unspent set as spent; (7) persist the new checkpoint.
+    /// `wollets` holds **all** of the wallet's federation-version wollets (they
+    /// share one `wallet_id`, exactly as the block-scan engine registers many
+    /// descriptors under one id). Their unspent sets are unioned before the
+    /// store reconciliation so one version's scan never clobbers a sibling
+    /// version's UTXOs.
+    ///
+    /// Steps: (1) per wollet, `full_scan` + `apply_update` (LWK unblinds and
+    /// reconciles internally) and collect its unspent projection; (2) take the
+    /// highest tip; (3) checkpoint-compare for a reorg common ancestor; (4) on
+    /// reorg, `rollback_above` both stores; (5) upsert the unioned authoritative
+    /// set; (6) mark outpoints that left the unspent set as spent; (7) persist
+    /// the new checkpoint.
     ///
     /// # Errors
     ///
-    /// [`SyncError::Backend`] on client/LWK failures, or the store's error on
-    /// persistence failures.
+    /// [`SyncError::Backend`] on client/LWK failures (or if `wollets` is empty),
+    /// or the store's error on persistence failures.
     pub fn sync(
         &mut self,
-        wollet: &mut ElementsWollet,
+        wallet_id: WalletId,
+        wollets: &mut [ElementsWollet],
         utxos: &dyn WalletUtxoStore,
         checkpoints: &dyn CheckpointStore,
     ) -> Result<NodelessSyncOutcome, SyncError> {
-        // 1. Scan + apply. LWK reconciles reorgs into the wollet's own state.
-        if let Some(update) = self
-            .client
-            .full_scan(wollet.inner())
-            .map_err(|e| SyncError::Backend(e.to_string()))?
-        {
-            wollet
-                .inner_mut()
-                .apply_update(update)
-                .map_err(|e| SyncError::Backend(e.to_string()))?;
+        // 1. Scan each version, apply LWK's reorg-reconciled update, and union
+        //    the projected unspent sets. Track the highest tip across versions
+        //    (they scan the same chain, so tips converge).
+        let mut current: Vec<CapturedUtxo> = Vec::new();
+        let mut new_tip: Option<SyncedTip> = None;
+        for wollet in wollets.iter_mut() {
+            if let Some(update) = self
+                .client
+                .full_scan(wollet.inner())
+                .map_err(|e| SyncError::Backend(e.to_string()))?
+            {
+                wollet
+                    .inner_mut()
+                    .apply_update(update)
+                    .map_err(|e| SyncError::Backend(e.to_string()))?;
+            }
+            let tip = wollet.inner().tip();
+            let t = SyncedTip {
+                height: tip.height(),
+                hash: tip.hash(),
+            };
+            if new_tip.is_none_or(|nt| t.height >= nt.height) {
+                new_tip = Some(t);
+            }
+            current.extend(project_unspent(wallet_id, wollet)?);
         }
+        let new_tip =
+            new_tip.ok_or_else(|| SyncError::Backend("sync called with no wollets".to_string()))?;
 
-        // 2. New tip.
-        let tip = wollet.inner().tip();
-        let new_tip = SyncedTip {
-            height: tip.height(),
-            hash: tip.hash(),
-        };
-
-        // 3. Reorg detection via checkpoint-compare.
-        let stored = checkpoints.load()?;
+        // 2. Reorg detection via checkpoint-compare (chain-level, per wallet).
+        let stored = checkpoints.load(wallet_id)?;
         let reorg_to = self.resolve_reorg(&stored, new_tip.height)?;
 
-        // 4. On reorg, purge above the common ancestor so the authoritative
+        // 3. On reorg, purge above the common ancestor so the authoritative
         //    upsert below reflects post-reorg truth.
         if let Some(h) = reorg_to {
             utxos.rollback_above(h)?;
-            checkpoints.rollback_above(h)?;
+            checkpoints.rollback_above(wallet_id, h)?;
         }
 
-        // 5. Project LWK's authoritative unspent set and upsert.
+        // 4. Reconcile the store to the unioned authoritative unspent set.
         let prev_unspent: std::collections::HashSet<OutPoint> = utxos
-            .list_unspent(self.wallet_id)?
+            .list_unspent(wallet_id)?
             .into_iter()
             .map(|u| u.outpoint)
             .collect();
-        let current = self.project_unspent(wollet)?;
         let current_set: std::collections::HashSet<OutPoint> =
             current.iter().map(|u| u.outpoint).collect();
         utxos.upsert_utxos(&current)?;
 
-        // 6. Anything that left the unspent set (and was not already purged as
-        //    reorged-out in step 4) has been spent.
+        // 5. Anything that left the unspent set (and was not already purged as
+        //    reorged-out in step 3) has been spent.
         let disappeared: Vec<OutPoint> = prev_unspent.difference(&current_set).copied().collect();
         if !disappeared.is_empty() {
             utxos.mark_spent(&disappeared, new_tip.height)?;
         }
 
-        // 7. Persist the new checkpoint.
-        checkpoints.save(new_tip)?;
+        // 6. Persist the new checkpoint.
+        checkpoints.save(wallet_id, new_tip)?;
 
         Ok(NodelessSyncOutcome {
             tip: new_tip,
@@ -174,46 +195,6 @@ impl<B: BlockchainBackend> NodelessSync<B> {
         self.client
             .broadcast(tx)
             .map_err(|e| SyncError::Backend(e.to_string()))
-    }
-
-    /// Project LWK's unspent [`WalletTxOut`](lwk_wollet::WalletTxOut) set into
-    /// [`CapturedUtxo`]. The confidential `TxOut` (PSET `witness_utxo`) is
-    /// recovered from the wallet's cached transaction; unconfirmed outputs
-    /// (mempool) are recorded at height `0`, matching LWK's height convention.
-    fn project_unspent(&self, wollet: &ElementsWollet) -> Result<Vec<CapturedUtxo>, SyncError> {
-        let w = wollet.inner();
-        let unspent = w.utxos().map_err(|e| SyncError::Backend(e.to_string()))?;
-        let mut out = Vec::with_capacity(unspent.len());
-        for u in unspent {
-            let wtx = w
-                .transaction(&u.outpoint.txid)
-                .map_err(|e| SyncError::Backend(e.to_string()))?
-                .ok_or_else(|| {
-                    SyncError::Backend(format!("cached tx {} missing for utxo", u.outpoint.txid))
-                })?;
-            let txout = wtx
-                .tx
-                .output
-                .get(u.outpoint.vout as usize)
-                .ok_or_else(|| {
-                    SyncError::Backend(format!(
-                        "vout {} out of range for tx {}",
-                        u.outpoint.vout, u.outpoint.txid
-                    ))
-                })?
-                .clone();
-            out.push(CapturedUtxo {
-                wallet_id: self.wallet_id,
-                outpoint: u.outpoint,
-                txout,
-                secrets: u.unblinded,
-                chain: u.ext_int,
-                wildcard_index: u.wildcard_index,
-                height: u.height.unwrap_or(0),
-                is_spent: false,
-            });
-        }
-        Ok(out)
     }
 
     /// Checkpoint-compare reorg detection: walk stored checkpoints highest-first
@@ -239,6 +220,49 @@ impl<B: BlockchainBackend> NodelessSync<B> {
             .map(elements::BlockHeader::block_hash)
             .ok_or_else(|| SyncError::Backend(format!("no header at height {height}")))
     }
+}
+
+/// Project LWK's unspent [`WalletTxOut`](lwk_wollet::WalletTxOut) set into
+/// [`CapturedUtxo`]. The confidential `TxOut` (PSET `witness_utxo`) is recovered
+/// from the wallet's cached transaction; unconfirmed outputs (mempool) are
+/// recorded at height `0`, matching LWK's height convention.
+fn project_unspent(
+    wallet_id: WalletId,
+    wollet: &ElementsWollet,
+) -> Result<Vec<CapturedUtxo>, SyncError> {
+    let w = wollet.inner();
+    let unspent = w.utxos().map_err(|e| SyncError::Backend(e.to_string()))?;
+    let mut out = Vec::with_capacity(unspent.len());
+    for u in unspent {
+        let wtx = w
+            .transaction(&u.outpoint.txid)
+            .map_err(|e| SyncError::Backend(e.to_string()))?
+            .ok_or_else(|| {
+                SyncError::Backend(format!("cached tx {} missing for utxo", u.outpoint.txid))
+            })?;
+        let txout = wtx
+            .tx
+            .output
+            .get(u.outpoint.vout as usize)
+            .ok_or_else(|| {
+                SyncError::Backend(format!(
+                    "vout {} out of range for tx {}",
+                    u.outpoint.vout, u.outpoint.txid
+                ))
+            })?
+            .clone();
+        out.push(CapturedUtxo {
+            wallet_id,
+            outpoint: u.outpoint,
+            txout,
+            secrets: u.unblinded,
+            chain: u.ext_int,
+            wildcard_index: u.wildcard_index,
+            height: u.height.unwrap_or(0),
+            is_spent: false,
+        });
+    }
+    Ok(out)
 }
 
 /// Pure core of [`NodelessSync::resolve_reorg`], factored out so it can be unit
@@ -288,12 +312,12 @@ impl NodelessSync<lwk_wollet::ElectrumClient> {
     /// # Errors
     ///
     /// [`SyncError::Backend`] if the URL is malformed or the connection fails.
-    pub fn new_electrum(url: &str, wallet_id: WalletId) -> Result<Self, SyncError> {
+    pub fn new_electrum(url: &str) -> Result<Self, SyncError> {
         let electrum_url = lwk_wollet::ElectrumUrl::from_str(url)
             .map_err(|e| SyncError::Backend(format!("invalid electrum url `{url}`: {e}")))?;
         let client = lwk_wollet::ElectrumClient::new(&electrum_url)
             .map_err(|e| SyncError::Backend(e.to_string()))?;
-        Ok(Self::from_client(client, wallet_id))
+        Ok(Self::from_client(client))
     }
 }
 
@@ -304,14 +328,10 @@ impl NodelessSync<lwk_wollet::blocking::EsploraClient> {
     /// # Errors
     ///
     /// [`SyncError::Backend`] if the client cannot be constructed.
-    pub fn new_esplora(
-        url: &str,
-        network: lwk_wollet::Network,
-        wallet_id: WalletId,
-    ) -> Result<Self, SyncError> {
+    pub fn new_esplora(url: &str, network: lwk_wollet::Network) -> Result<Self, SyncError> {
         let client = lwk_wollet::blocking::EsploraClient::new(url, network)
             .map_err(|e| SyncError::Backend(e.to_string()))?;
-        Ok(Self::from_client(client, wallet_id))
+        Ok(Self::from_client(client))
     }
 
     /// Connect to an Esplora endpoint that supports the **Waterfalls**
@@ -321,47 +341,53 @@ impl NodelessSync<lwk_wollet::blocking::EsploraClient> {
     /// # Errors
     ///
     /// [`SyncError::Backend`] if the client cannot be constructed.
-    pub fn new_waterfalls(
-        url: &str,
-        network: lwk_wollet::Network,
-        wallet_id: WalletId,
-    ) -> Result<Self, SyncError> {
+    pub fn new_waterfalls(url: &str, network: lwk_wollet::Network) -> Result<Self, SyncError> {
         let client = lwk_wollet::blocking::EsploraClient::new_waterfalls(url, network)
             .map_err(|e| SyncError::Backend(e.to_string()))?;
-        Ok(Self::from_client(client, wallet_id))
+        Ok(Self::from_client(client))
     }
 }
 
-/// In-memory [`CheckpointStore`] for tests and small single-process consumers.
+/// In-memory per-wallet [`CheckpointStore`] for tests and small single-process
+/// consumers.
 #[cfg(any(test, feature = "test-utils"))]
 #[derive(Default)]
 pub struct MemCheckpointStore {
-    inner: std::sync::Mutex<std::collections::BTreeMap<u32, BlockHash>>,
+    inner: std::sync::Mutex<
+        std::collections::BTreeMap<WalletId, std::collections::BTreeMap<u32, BlockHash>>,
+    >,
 }
 
 #[cfg(any(test, feature = "test-utils"))]
 impl CheckpointStore for MemCheckpointStore {
-    fn load(&self) -> Result<Vec<SyncedTip>, SyncError> {
+    fn load(&self, wallet: WalletId) -> Result<Vec<SyncedTip>, SyncError> {
         let map = self.inner.lock().expect("checkpoint mutex");
         Ok(map
-            .iter()
-            .map(|(&height, &hash)| SyncedTip { height, hash })
+            .get(&wallet)
+            .into_iter()
+            .flat_map(|m| m.iter().map(|(&height, &hash)| SyncedTip { height, hash }))
             .collect())
     }
 
-    fn save(&self, tip: SyncedTip) -> Result<(), SyncError> {
+    fn save(&self, wallet: WalletId, tip: SyncedTip) -> Result<(), SyncError> {
         self.inner
             .lock()
             .expect("checkpoint mutex")
+            .entry(wallet)
+            .or_default()
             .insert(tip.height, tip.hash);
         Ok(())
     }
 
-    fn rollback_above(&self, height: u32) -> Result<(), SyncError> {
-        self.inner
+    fn rollback_above(&self, wallet: WalletId, height: u32) -> Result<(), SyncError> {
+        if let Some(m) = self
+            .inner
             .lock()
             .expect("checkpoint mutex")
-            .retain(|&h, _| h <= height);
+            .get_mut(&wallet)
+        {
+            m.retain(|&h, _| h <= height);
+        }
         Ok(())
     }
 }
