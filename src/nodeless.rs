@@ -203,6 +203,18 @@ impl<B: BlockchainBackend> NodelessSync<B> {
             .map_err(|e| SyncError::Backend(e.to_string()))
     }
 
+    /// Current chain-tip height straight from the backend (no wallet scan).
+    ///
+    /// # Errors
+    ///
+    /// [`SyncError::Backend`] if the client can't fetch the tip header.
+    pub fn tip_height(&mut self) -> Result<u32, SyncError> {
+        self.client
+            .tip()
+            .map(|header| header.height)
+            .map_err(|e| SyncError::Backend(e.to_string()))
+    }
+
     /// Checkpoint-compare reorg detection: walk stored checkpoints highest-first
     /// and re-query the backend header at each height. The highest checkpoint
     /// whose hash still matches the chain is the common ancestor; a reorg is
