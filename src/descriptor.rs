@@ -23,6 +23,32 @@ pub enum CtKeyMode {
 
 /// Builder for `ct(slip77(...), elwsh(sortedmulti(m, ...)))` confidential
 /// descriptors.
+///
+/// # Example
+///
+/// Assemble a 2-of-3 confidential multisig descriptor from three signers. This
+/// example is fully offline — no network or HSM is touched.
+///
+/// ```
+/// use bitcoin::Network;
+/// use emvault_core::MockSigner;
+/// use emvault_elements::CtDescriptorBuilder;
+///
+/// // A 32-byte SLIP-77 master blinding key. In production this comes from your
+/// // key manager; here it is a fixed fixture.
+/// let mbk = [0x11u8; 32];
+///
+/// let mut builder = CtDescriptorBuilder::new(2, &mbk)?;
+/// for seed in 1..=3u64 {
+///     builder.add_signer(&MockSigner::with_seed(seed, Network::Testnet))?;
+/// }
+/// let descriptor = builder.build()?;
+///
+/// let s = descriptor.to_string();
+/// assert!(s.starts_with("ct(slip77("), "got: {s}");
+/// assert!(s.contains("sortedmulti(2,"), "got: {s}");
+/// # Ok::<(), emvault_elements::CtDescriptorError>(())
+/// ```
 #[derive(Debug)]
 pub struct CtDescriptorBuilder {
     threshold: u32,

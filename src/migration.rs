@@ -574,7 +574,7 @@ mod tests {
             utxos: values
                 .iter()
                 .enumerate()
-                .map(|(i, v)| utxo(i as u32, *v))
+                .map(|(i, v)| utxo(u32::try_from(i).expect("utxo index fits u32"), *v))
                 .collect(),
             destination_address: dummy_addr(),
         }
@@ -637,6 +637,62 @@ mod tests {
             .plan(&accounts, 100)
             .unwrap_err();
         assert!(matches!(err, MigrationError::InsufficientFeeBalance { .. }));
+    }
+
+    // --- estimate_elements_fee_sat / synthetic_change_outpoint --------------
+
+    #[test]
+    fn estimate_fee_matches_formula() {
+        // (inputs*1100 + outputs*1500 + 200) * rate / 10
+        let got = estimate_elements_fee_sat(3, 2, 5);
+        let expected: u64 = (3 * 1100 + 2 * 1500 + 200) * 5 / 10;
+        assert_eq!(got, expected);
+        assert_eq!(expected, 3250);
+    }
+
+    #[test]
+    fn estimate_fee_zero_rate_is_zero() {
+        assert_eq!(estimate_elements_fee_sat(10, 4, 0), 0);
+    }
+
+    #[test]
+    fn estimate_fee_monotonic_in_inputs() {
+        assert!(estimate_elements_fee_sat(5, 2, 10) > estimate_elements_fee_sat(3, 2, 10));
+    }
+
+    #[test]
+    fn estimate_fee_monotonic_in_outputs() {
+        assert!(estimate_elements_fee_sat(3, 4, 10) > estimate_elements_fee_sat(3, 2, 10));
+    }
+
+    #[test]
+    fn estimate_fee_monotonic_in_rate() {
+        assert!(estimate_elements_fee_sat(3, 2, 20) > estimate_elements_fee_sat(3, 2, 10));
+    }
+
+    #[test]
+    fn synthetic_outpoint_is_deterministic() {
+        assert_eq!(synthetic_change_outpoint(7), synthetic_change_outpoint(7));
+    }
+
+    #[test]
+    fn synthetic_outpoint_has_zeroed_txid_and_index_vout() {
+        let op = synthetic_change_outpoint(42);
+        assert_eq!(
+            op.txid.to_string(),
+            "0".repeat(64),
+            "txid must be all zeros"
+        );
+        assert_eq!(op.vout, 42, "vout carries the preceding tx index");
+    }
+
+    #[test]
+    fn synthetic_outpoint_distinct_across_inputs() {
+        let a = synthetic_change_outpoint(0);
+        let b = synthetic_change_outpoint(1);
+        assert_ne!(a, b);
+        assert_eq!(a.txid, b.txid, "same zeroed txid");
+        assert_ne!(a.vout, b.vout, "distinguished by vout");
     }
 
     #[test]

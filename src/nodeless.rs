@@ -524,4 +524,111 @@ mod tests {
         let got = resolve_reorg_with(&stored, 100, |_| Ok(hash(0xff))).unwrap();
         assert_eq!(got, Some(89));
     }
+
+    /// Electrum constructor coverage. LWK's `ElectrumClient::new` connects
+    /// eagerly on build, so we can only exercise the offline URL-parse error
+    /// branch here (the successful-connect path needs a live server).
+    #[cfg(feature = "electrum")]
+    mod electrum_ctor {
+        use super::*;
+
+        #[test]
+        fn new_electrum_rejects_malformed_url() {
+            // A string that fails `ElectrumUrl` parsing before any connection is
+            // attempted; `new_electrum` maps that into `SyncError::Backend`.
+            // (Match on the Result directly: `NodelessSync` is not `Debug`, so
+            // `unwrap_err` is unavailable.)
+            match NodelessSync::new_electrum("not-a-url") {
+                Err(SyncError::Backend(msg)) => {
+                    assert!(
+                        msg.contains("invalid electrum url"),
+                        "expected URL-parse error, got: {msg}"
+                    );
+                }
+                Err(other) => panic!("expected SyncError::Backend, got {other:?}"),
+                Ok(_) => panic!("malformed URL must not build an electrum client"),
+            }
+        }
+    }
+
+    /// Esplora / Waterfalls constructor coverage. These LWK clients build
+    /// **without** connecting (the HTTP/token round-trips are lazy), so every
+    /// constructor returns `Ok` fully offline.
+    ///
+    /// Note: LWK stores the `TokenProvider` in private fields with no getter, so
+    /// the authenticated tests can only assert that the constructor *accepts*
+    /// each provider and builds `Ok` — the attached token itself is not
+    /// observable from outside LWK.
+    #[cfg(feature = "esplora")]
+    mod esplora_ctor {
+        use super::*;
+
+        fn networks() -> [lwk_wollet::Network; 3] {
+            [
+                lwk_wollet::Network::Liquid,
+                lwk_wollet::Network::TestnetLiquid,
+                lwk_wollet::Network::default_regtest(),
+            ]
+        }
+
+        const URL: &str = "https://esplora.invalid/api";
+
+        #[test]
+        fn new_esplora_builds_ok_for_each_network() {
+            for net in networks() {
+                assert!(
+                    NodelessSync::new_esplora(URL, net).is_ok(),
+                    "esplora build should succeed offline for {net:?}"
+                );
+            }
+        }
+
+        #[test]
+        fn new_waterfalls_builds_ok_for_each_network() {
+            for net in networks() {
+                assert!(
+                    NodelessSync::new_waterfalls(URL, net).is_ok(),
+                    "waterfalls build should succeed offline for {net:?}"
+                );
+            }
+        }
+
+        #[test]
+        fn new_esplora_authenticated_accepts_token_providers() {
+            let net = lwk_wollet::Network::default_regtest();
+            // Token material is stored in LWK-private fields (no getter): we can
+            // only assert the constructor accepts each provider and builds Ok.
+            let providers = [
+                TokenProvider::None,
+                TokenProvider::Static("static-token".to_string()),
+                TokenProvider::Blockstream {
+                    url: "https://auth.invalid/token".to_string(),
+                    client_id: "client-id".to_string(),
+                    client_secret: "client-secret".to_string(),
+                },
+            ];
+            for provider in providers {
+                assert!(
+                    NodelessSync::new_esplora_authenticated(URL, net, provider).is_ok(),
+                    "authenticated esplora build should succeed offline"
+                );
+            }
+        }
+
+        #[test]
+        fn new_waterfalls_authenticated_accepts_token_providers() {
+            let net = lwk_wollet::Network::default_regtest();
+            // Same private-field limitation as above; assert Ok for None/Static.
+            let providers = [
+                TokenProvider::None,
+                TokenProvider::Static("static-token".to_string()),
+            ];
+            for provider in providers {
+                assert!(
+                    NodelessSync::new_waterfalls_authenticated(URL, net, provider).is_ok(),
+                    "authenticated waterfalls build should succeed offline"
+                );
+            }
+        }
+    }
 }
