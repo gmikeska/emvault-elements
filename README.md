@@ -26,7 +26,9 @@ Persistence (the database) remains the consuming application's responsibility.
 | [`confidential`](src/confidential.rs) | Defense-in-depth validation for blinded PSETs (range/surjection-proof + blinder-index checks). |
 | [`spend`](src/spend.rs) | Spend-path construction: captured UTXOs → blinded, signable PSET (spend / sweep / migration). |
 | [`wollet`](src/wollet.rs) | `ElementsWollet` — client-side wallet wrapping `lwk_wollet::Wollet` for address derivation + unblinding. |
-| [`sync`](src/sync.rs) | Shared block-scan pipeline: DB-agnostic stores, chain-source transport, and `BlockScanEngine`. |
+| [`sync`](src/sync/mod.rs) | Shared block-scan pipeline: DB-agnostic stores, chain-source transport, and `BlockScanEngine`. |
+| [`nodeless`](src/nodeless.rs) | Nodeless sync over LWK's blockchain clients (no `elementsd`): `NodelessSync` with `new_electrum` / `new_esplora` / `new_waterfalls` constructors (+ `*_authenticated` variants taking a `TokenProvider` for Blockstream enterprise OAuth), a `CheckpointStore`, and a `tip_height()` accessor. Behind the `electrum` / `esplora` / `nodeless` features. |
+| [`migration`](src/migration.rs) | Elements federation-migration planning (roster reuse + sweep construction), mirroring the Bitcoin side: `ElementsMigrationPlan`, `ElementsSweepAlgorithm`, `ElementsSweepTransaction`, and the account-for-account sweep set types. |
 | [`federated_wallet`](src/federated_wallet.rs) | `ElementsFederatedWallet` — version-aware federated wallet. |
 | [`rpc`](src/rpc.rs) | `ElementsRpc` — thin `bitcoincore_rpc` wrapper for the Elements daemon's CT-aware JSON-RPC calls. |
 | [`error`](src/error.rs) | `thiserror`-derived error types (`PsetError`, `CtDescriptorError`, `SpendError`, `SyncError`, `WolletError`). |
@@ -51,6 +53,9 @@ HSM backend when `emvault-pkcs11` is built with its `elements` feature.
 
 | Feature | Default | Effect |
 | ------- | ------- | ------ |
+| `electrum` | off | Nodeless Elements/Liquid sync over Electrum (via `lwk_wollet/electrum`); enables `nodeless::NodelessSync::new_electrum`. |
+| `esplora` | off | Nodeless Elements/Liquid sync over Esplora **and** the Waterfalls descriptor endpoint (same client, via `lwk_wollet/esplora`); enables the `new_esplora` / `new_waterfalls` constructors (+ `*_authenticated` `TokenProvider` variants). |
+| `nodeless` | off | Convenience umbrella = `electrum` + `esplora`; turns on the full nodeless backend surface at once. |
 | `test-utils` | off | Exposes the in-memory sync fakes (`MemBlockStore`, `MemUtxoStore`, `MockChainSource`) and `testkit::SoftwareSigner` for downstream test suites. |
 
 ## Build and test
