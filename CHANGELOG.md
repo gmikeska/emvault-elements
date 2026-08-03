@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 > Entries for 0.5.0 and earlier were reconstructed from git history.
 
+## [0.7.0] - 2026-08-03
+
+### Added
+- Nodeless sync backends (new `nodeless` module): drive Elements/Liquid wallet
+  sync over LWK's blockchain clients with no local `elementsd` — Electrum,
+  Esplora, and Waterfalls — behind the `electrum` / `esplora` / `nodeless`
+  features. Brings the Liquid side to chain-backend parity with Bitcoin.
+- Authenticated Esplora/Waterfalls constructors (`TokenProvider`) for
+  Blockstream enterprise endpoints (OAuth), so the served liquidtestnet
+  enterprise tier can be used directly without a proxy or fork.
+- Nodeless `tip_height()` on the wollet — read the chain tip from the active
+  backend without an RPC node.
+- Elements roster-reuse + migration-planning layer (`SweepAlgorithm` /
+  `MigrationPlan`), mirroring the Bitcoin side, for federation migrations.
+
+### Changed
+- Documentation updates.
+- Released in lockstep with the suite-wide v0.7.0 update.
+
 ## [0.6.0] - 2026-07-29
 
 ### Changed
