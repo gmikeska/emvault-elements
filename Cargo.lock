@@ -712,6 +712,8 @@ dependencies = [
 [[package]]
 name = "emvault-core"
 version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c43bf95e8a3ffbb832df99050013e9e90d22a0f5ed28eba076a37cb0fb91756e"
 dependencies = [
  "bdk_bitcoind_rpc",
  "bdk_wallet",
