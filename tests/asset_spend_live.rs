@@ -94,6 +94,54 @@ fn find_output(rpc: &Client, txid: &str, spk: &elements::Script) -> (u32, elemen
     panic!("no output paying our script in {txid}");
 }
 
+/// Build a 2-of-3 confidential federation wallet from three seeds + a blinding
+/// byte, on the given network.
+fn fed_wollet(
+    seeds: [u8; 3],
+    blinding: u8,
+    net: ElementsNetwork,
+    lwk_net: lwk_wollet::Network,
+) -> (Vec<SoftwareSigner>, ElementsWollet) {
+    let signers: Vec<SoftwareSigner> = seeds
+        .map(|s| SoftwareSigner::new_with_lwk(s, lwk_net))
+        .to_vec();
+    let mbk = [blinding; 32];
+    let mut b = CtDescriptorBuilder::new(2, &mbk)
+        .unwrap()
+        .key_mode(CtKeyMode::Ranged);
+    for s in &signers {
+        b.add_signer(s as &dyn Signer).unwrap();
+    }
+    let desc = b.build().unwrap();
+    let handle = ElementsWalletHandle::new(desc, mbk);
+    let wollet = ElementsWollet::from_handle_with_lwk(&handle, net, lwk_net).unwrap();
+    (signers, wollet)
+}
+
+/// Send `units` whole units of `asset_hex` to a confidential address, returning
+/// the funding txid.
+fn send_asset(rpc: &Client, addr: &str, units: u64, asset_hex: &str) -> String {
+    call(
+        rpc,
+        "sendtoaddress",
+        &[
+            json!(addr),
+            json!(units),
+            json!(""),
+            json!(""),
+            json!(false),
+            json!(false),
+            json!(1),
+            json!("unset"),
+            json!(false),
+            json!(asset_hex),
+        ],
+    )
+    .as_str()
+    .unwrap()
+    .to_string()
+}
+
 #[test]
 #[allow(clippy::too_many_lines)]
 fn asset_receive_and_spend_live() {
@@ -564,5 +612,138 @@ fn asset_migration_moves_asset_live() {
     assert_eq!(got_lbtc, cust_lbtc_val, "customer L-BTC migrated in full");
     eprintln!(
         "ASSET MIGRATION CONFIRMED: {txid} — new fed got {got_lbtc} sat L-BTC + {got_asset} asset units"
+    );
+}
+
+/// Live regtest **multi-customer asset migration**: two customers holding
+/// *different* amounts of the same asset are migrated in one account-for-account
+/// transaction (fee account pays). Verifies each customer's new-federation
+/// address receives **exactly its own amount** — i.e. per-customer counts are
+/// preserved, not crossed or merged.
+#[test]
+#[allow(clippy::too_many_lines, clippy::similar_names)]
+fn asset_migration_preserves_per_customer_amounts_live() {
+    if skip() {
+        return;
+    }
+    let rpc = wallet_client();
+    let net = ElementsNetwork::ElementsRegtest;
+
+    let issue = call(&rpc, "issueasset", &[json!(1000), json!(0)]);
+    let asset_hex = issue["asset"].as_str().expect("asset id").to_string();
+    let asset = elements::AssetId::from_str(&asset_hex).unwrap();
+    mine(&rpc);
+
+    let genesis =
+        elements::BlockHash::from_str(call(&rpc, "getblockhash", &[json!(0)]).as_str().unwrap())
+            .unwrap();
+    let side = call(&rpc, "getsidechaininfo", &[]);
+    let policy = elements::AssetId::from_str(side["pegged_asset"].as_str().unwrap()).unwrap();
+    let lwk_net = ElementsNetwork::custom_regtest(policy, genesis);
+
+    // Old fed: fee account + two asset-only customers. New fed: rotated dests.
+    let (fee_sgn, fee_w) = fed_wollet([1, 2, 3], 0xa1, net, lwk_net);
+    let (a_sgn, a_w) = fed_wollet([4, 5, 6], 0xb2, net, lwk_net);
+    let (b_sgn, b_w) = fed_wollet([7, 8, 9], 0xc3, net, lwk_net);
+    let (_na_sgn, na_w) = fed_wollet([10, 11, 12], 0xd4, net, lwk_net);
+    let (_nb_sgn, nb_w) = fed_wollet([13, 14, 15], 0xe5, net, lwk_net);
+    let (_nf_sgn, nf_w) = fed_wollet([16, 17, 18], 0xf6, net, lwk_net);
+
+    let ext = lwk_wollet::Chain::External;
+    let fee_addr = fee_w.address(ext, 0).unwrap();
+    let a_addr = a_w.address(ext, 0).unwrap();
+    let b_addr = b_w.address(ext, 0).unwrap();
+    let a_dest = na_w.address(ext, 0).unwrap();
+    let b_dest = nb_w.address(ext, 0).unwrap();
+    let fee_dest = nf_w.address(ext, 0).unwrap();
+
+    // Fund: fee 1.0 L-BTC; customer A 120 units; customer B 305 units (distinct).
+    let fee_txid = call(
+        &rpc,
+        "sendtoaddress",
+        &[json!(fee_addr.to_string()), json!(1.0)],
+    )
+    .as_str()
+    .unwrap()
+    .to_string();
+    let a_txid = send_asset(&rpc, &a_addr.to_string(), 120, &asset_hex);
+    let b_txid = send_asset(&rpc, &b_addr.to_string(), 305, &asset_hex);
+    mine(&rpc);
+
+    let wid = WalletId::from_bytes([6; 16]);
+    let cap = |w: &ElementsWollet, txid: &str, addr: &elements::Address, idx: u32| {
+        let (vout, txout) = find_output(&rpc, txid, &addr.script_pubkey());
+        captured_from_output(
+            w,
+            elements::Txid::from_str(txid).unwrap(),
+            vout,
+            &txout,
+            wid,
+            idx,
+        )
+        .expect("capture")
+    };
+    let fee_utxo = cap(&fee_w, &fee_txid, &fee_addr, 0);
+    let a_utxo = cap(&a_w, &a_txid, &a_addr, 0);
+    let b_utxo = cap(&b_w, &b_txid, &b_addr, 0);
+    let a_val = a_utxo.value();
+    let b_val = b_utxo.value();
+    assert_ne!(a_val, b_val, "the two customers hold different amounts");
+
+    let inputs = vec![(fee_utxo, &fee_w), (a_utxo, &a_w), (b_utxo, &b_w)];
+    let recipients = vec![
+        (a_dest.clone(), a_val, asset),
+        (b_dest.clone(), b_val, asset),
+    ];
+    let blinded = build_migration_pset(&fee_w, &inputs, &recipients, &fee_dest, 1000.0).unwrap();
+
+    let mut pset = blinded.into_pset();
+    for s in fee_sgn
+        .iter()
+        .take(2)
+        .chain(a_sgn.iter().take(2))
+        .chain(b_sgn.iter().take(2))
+    {
+        s.sign_pset(&mut pset).unwrap();
+    }
+    finalize_p2wsh_pset(&mut pset).unwrap();
+    let tx = pset.extract_tx().unwrap();
+    let raw_hex = elements::encode::serialize_hex(&tx);
+
+    let txid = call(&rpc, "sendrawtransaction", &[json!(raw_hex)])
+        .as_str()
+        .unwrap()
+        .to_string();
+    let mine_addr = call(&rpc, "getnewaddress", &[]);
+    let blocks = call(&rpc, "generatetoaddress", &[json!(1), mine_addr]);
+    let blockhash = blocks[0].as_str().unwrap();
+    let mined = call(
+        &rpc,
+        "getrawtransaction",
+        &[json!(txid), json!(true), json!(blockhash)],
+    );
+    assert_eq!(
+        mined["txid"].as_str(),
+        Some(txid.as_str()),
+        "migration mined"
+    );
+
+    // Each customer's new-fed address receives EXACTLY its own amount.
+    let got = |w: &ElementsWollet, dest: &elements::Address| -> u64 {
+        let spk = dest.script_pubkey();
+        tx.output
+            .iter()
+            .filter(|o| o.script_pubkey == spk)
+            .filter_map(|o| w.unblind(o).ok())
+            .find(|s| s.asset == asset)
+            .map_or(0, |s| s.value)
+    };
+    let a_got = got(&na_w, &a_dest);
+    let b_got = got(&nb_w, &b_dest);
+    assert_eq!(a_got, a_val, "customer A amount preserved");
+    assert_eq!(b_got, b_val, "customer B amount preserved");
+    assert_ne!(a_got, b_got, "amounts stayed distinct (not crossed/merged)");
+    eprintln!(
+        "MULTI-CUSTOMER MIGRATION CONFIRMED: {txid} — A={a_got}, B={b_got} (distinct, preserved)"
     );
 }
