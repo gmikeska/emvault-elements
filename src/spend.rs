@@ -118,8 +118,12 @@ pub fn build_sweep_pset(
 ///
 /// `inputs` pairs each captured UTXO with the [`ElementsWollet`] that owns it
 /// (so its inputs are enriched with the correct multisig metadata).
-/// `customer_recipients` are exact `(address, amount)` pairs;
-/// `fee_account_dest` receives `sum(inputs) - sum(customers) - fee`.
+/// `customer_recipients` are exact `(address, amount, asset)` triples — one per
+/// account per asset, so an account's L-BTC and each issued asset each get their
+/// own output (Elements txs balance per asset). The fee account's own non-policy
+/// assets are passed here too (with `fee_account_dest` as the address); its
+/// **L-BTC** is not — `fee_account_dest` receives the L-BTC drain
+/// `sum(L-BTC inputs) - sum(L-BTC customers) - fee`.
 ///
 /// # Errors
 ///
@@ -128,7 +132,7 @@ pub fn build_sweep_pset(
 pub fn build_migration_pset(
     fee_wollet: &ElementsWollet,
     inputs: &[(CapturedUtxo, &ElementsWollet)],
-    customer_recipients: &[(Address, u64)],
+    customer_recipients: &[(Address, u64, elements::AssetId)],
     fee_account_dest: &Address,
     fee_rate_sat_per_kvb: f32,
 ) -> Result<BlindedPset, SpendError> {
@@ -153,9 +157,9 @@ pub fn build_migration_pset(
     let mut builder = TxBuilder::new(fee_wollet.lwk_network())
         .add_external_utxos(external)
         .map_err(|e| SpendError::Build(e.to_string()))?;
-    for (addr, amount) in customer_recipients {
+    for (addr, amount, asset) in customer_recipients {
         builder = builder
-            .add_lbtc_recipient(addr, *amount)
+            .add_recipient(addr, *amount, *asset)
             .map_err(|e| SpendError::Build(e.to_string()))?;
     }
     let pset = builder
@@ -453,7 +457,10 @@ mod tests {
         let blinded = build_migration_pset(
             &w_f,
             &inputs,
-            &[(c1_dest.clone(), 200_000), (c2_dest.clone(), 300_000)],
+            &[
+                (c1_dest.clone(), 200_000, lbtc()),
+                (c2_dest.clone(), 300_000, lbtc()),
+            ],
             &f_dest,
             2000.0,
         )
@@ -549,7 +556,7 @@ mod tests {
 
         // Build one batch tx, sign with `signers`, finalize, extract.
         let run = |inputs: &[(CapturedUtxo, &ElementsWollet)],
-                   customers: &[(Address, u64)],
+                   customers: &[(Address, u64, AssetId)],
                    fee_dest: &Address,
                    signers: &[&SoftSigner]|
          -> elements::Transaction {
@@ -602,7 +609,7 @@ mod tests {
         // --- tx0: C1 + real fee utxo → C1 exact, change back to F old. ------
         let tx0 = run(
             &[(c1_utxo, &w_c1), (f_utxo, &w_f)],
-            &[(c1_dest.clone(), C1_BAL)],
+            &[(c1_dest.clone(), C1_BAL, lbtc())],
             &f_old,
             &[&sg_c1[0], &sg_c1[1], &sg_f[0], &sg_f[1]],
         );
@@ -618,7 +625,7 @@ mod tests {
         // --- tx1: C2 + chained change → C2 exact, change back to F old. -----
         let tx1 = run(
             &[(c2_utxo, &w_c2), (change0, &w_f)],
-            &[(c2_dest.clone(), C2_BAL)],
+            &[(c2_dest.clone(), C2_BAL, lbtc())],
             &f_old,
             &[&sg_c2[0], &sg_c2[1], &sg_f[0], &sg_f[1]],
         );
@@ -645,6 +652,52 @@ mod tests {
             INITIAL_FEE,
             "fee account paid exactly the cumulative fee; customers got full balances"
         );
+    }
+
+    #[test]
+    fn migration_moves_asset_and_lbtc() {
+        let (_fed_f, w_f, sg_f) = federation_and_wollet([1, 2, 3], 0xaa);
+        let (_fed_c, w_c, sg_c) = federation_and_wollet([4, 5, 6], 0xbb);
+        let asset = AssetId::from_byte_array([0x33; 32]);
+
+        // Fee account F holds L-BTC; customer C holds L-BTC + the asset.
+        let f_utxo = funding_utxo(&w_f, 0, 200_000, 1);
+        let c_lbtc = funding_utxo(&w_c, 0, 300_000, 2);
+        let c_asset = funding_asset_utxo(&w_c, 1, 5_000, 3, asset);
+        let c_dest = w_c.address(lwk_wollet::Chain::External, 5).unwrap();
+        let f_dest = w_f.address(lwk_wollet::Chain::External, 5).unwrap();
+
+        let inputs = vec![(f_utxo, &w_f), (c_lbtc, &w_c), (c_asset, &w_c)];
+        // One recipient per (account, asset): customer L-BTC + customer asset.
+        let recipients = vec![
+            (c_dest.clone(), 300_000u64, lbtc()),
+            (c_dest.clone(), 5_000u64, asset),
+        ];
+        let blinded = build_migration_pset(&w_f, &inputs, &recipients, &f_dest, 2000.0).unwrap();
+        let tx = blinded.as_pset().extract_tx().unwrap();
+
+        // Customer receives its full L-BTC + full asset (two outputs at c_dest).
+        let spk = c_dest.script_pubkey();
+        let mut got_lbtc = 0u64;
+        let mut got_asset = 0u64;
+        for o in tx.output.iter().filter(|o| o.script_pubkey == spk) {
+            let s = w_c.unblind(o).unwrap();
+            if s.asset == lbtc() {
+                got_lbtc = s.value;
+            } else if s.asset == asset {
+                got_asset = s.value;
+            }
+        }
+        assert_eq!(got_lbtc, 300_000, "customer L-BTC migrated in full");
+        assert_eq!(got_asset, 5_000, "customer asset migrated in full");
+
+        // Both accounts' 2-of-3 sign + finalize.
+        let mut pset = blinded.into_pset();
+        for s in [&sg_f[0], &sg_f[1], &sg_c[0], &sg_c[1]] {
+            s.sign_pset(&mut pset).unwrap();
+        }
+        crate::finalize_p2wsh_pset(&mut pset).unwrap();
+        assert_eq!(pset.extract_tx().unwrap().input.len(), 3);
     }
 
     #[test]
