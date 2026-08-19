@@ -30,8 +30,8 @@ use emvault_elements::sync::WalletId;
 use emvault_elements::testkit::SoftwareSigner;
 use emvault_elements::{
     CtDescriptorBuilder, CtKeyMode, ElementsNetwork, ElementsSigner, ElementsWalletHandle,
-    ElementsWollet, build_asset_spend_pset, captured_from_output, elements, finalize_p2wsh_pset,
-    lwk_wollet,
+    ElementsWollet, build_asset_spend_pset, build_migration_pset, captured_from_output, elements,
+    finalize_p2wsh_pset, lwk_wollet,
 };
 
 fn skip() -> bool {
@@ -390,4 +390,179 @@ fn asset_max_drain_live() {
         "node asset balance should rise by the full 250 units: before={before} after={after}"
     );
     eprintln!("MAX DRAIN CONFIRMED: {txid} — node asset {before} → {after} (+250)");
+}
+
+/// Live regtest **asset migration** (account-for-account): an old-federation
+/// customer holding L-BTC + an issued asset is migrated to a new federation; the
+/// old fee account pays the L-BTC fee. Verifies on-chain that the new federation
+/// receives the customer's **full L-BTC and full asset** — i.e. assets migrate.
+#[test]
+#[allow(clippy::too_many_lines, clippy::similar_names)]
+fn asset_migration_moves_asset_live() {
+    if skip() {
+        return;
+    }
+    let rpc = wallet_client();
+    let net = ElementsNetwork::ElementsRegtest;
+
+    let issue = call(&rpc, "issueasset", &[json!(500), json!(0)]);
+    let asset_hex = issue["asset"].as_str().expect("asset id").to_string();
+    let asset = elements::AssetId::from_str(&asset_hex).unwrap();
+    mine(&rpc);
+
+    let genesis_hex = call(&rpc, "getblockhash", &[json!(0)]);
+    let genesis = elements::BlockHash::from_str(genesis_hex.as_str().unwrap()).unwrap();
+    let side = call(&rpc, "getsidechaininfo", &[]);
+    let policy =
+        elements::AssetId::from_str(side["pegged_asset"].as_str().expect("pegged_asset")).unwrap();
+    let lwk_net = ElementsNetwork::custom_regtest(policy, genesis);
+
+    // Build a 2-of-3 confidential federation wallet from three seeds + blinding.
+    let build = |seeds: [u8; 3], blinding: u8| -> (Vec<SoftwareSigner>, ElementsWollet) {
+        let signers: Vec<SoftwareSigner> = seeds
+            .map(|s| SoftwareSigner::new_with_lwk(s, lwk_net))
+            .to_vec();
+        let mbk = [blinding; 32];
+        let mut b = CtDescriptorBuilder::new(2, &mbk)
+            .unwrap()
+            .key_mode(CtKeyMode::Ranged);
+        for s in &signers {
+            b.add_signer(s as &dyn Signer).unwrap();
+        }
+        let desc = b.build().unwrap();
+        let handle = ElementsWalletHandle::new(desc, mbk);
+        let wollet = ElementsWollet::from_handle_with_lwk(&handle, net, lwk_net).unwrap();
+        (signers, wollet)
+    };
+
+    // OLD federation: fee account + a customer. NEW federation: rotated dests.
+    let (fee_sgn, fee_w) = build([1, 2, 3], 0xa1);
+    let (cust_sgn, cust_w) = build([4, 5, 6], 0xb2);
+    let (_newc_sgn, newc_w) = build([7, 8, 9], 0xc3);
+    let (_newf_sgn, newf_w) = build([10, 11, 12], 0xd4);
+
+    let fee_addr = fee_w.address(lwk_wollet::Chain::External, 0).unwrap();
+    let cust_lbtc_addr = cust_w.address(lwk_wollet::Chain::External, 0).unwrap();
+    let cust_asset_addr = cust_w.address(lwk_wollet::Chain::External, 1).unwrap();
+    let new_cust_dest = newc_w.address(lwk_wollet::Chain::External, 0).unwrap();
+    let new_fee_dest = newf_w.address(lwk_wollet::Chain::External, 0).unwrap();
+
+    // Fund: old fee 1.0 L-BTC; old customer 0.5 L-BTC + 250 asset units.
+    let fee_txid = call(
+        &rpc,
+        "sendtoaddress",
+        &[json!(fee_addr.to_string()), json!(1.0)],
+    )
+    .as_str()
+    .unwrap()
+    .to_string();
+    let cust_lbtc_txid = call(
+        &rpc,
+        "sendtoaddress",
+        &[json!(cust_lbtc_addr.to_string()), json!(0.5)],
+    )
+    .as_str()
+    .unwrap()
+    .to_string();
+    let cust_asset_txid = call(
+        &rpc,
+        "sendtoaddress",
+        &[
+            json!(cust_asset_addr.to_string()),
+            json!(250),
+            json!(""),
+            json!(""),
+            json!(false),
+            json!(false),
+            json!(1),
+            json!("unset"),
+            json!(false),
+            json!(asset_hex),
+        ],
+    )
+    .as_str()
+    .unwrap()
+    .to_string();
+    mine(&rpc);
+
+    // Capture the three old-fed UTXOs.
+    let wid = WalletId::from_bytes([5; 16]);
+    let cap = |w: &ElementsWollet, txid: &str, addr: &elements::Address, idx: u32| {
+        let (vout, txout) = find_output(&rpc, txid, &addr.script_pubkey());
+        captured_from_output(
+            w,
+            elements::Txid::from_str(txid).unwrap(),
+            vout,
+            &txout,
+            wid,
+            idx,
+        )
+        .expect("capture")
+    };
+    let fee_utxo = cap(&fee_w, &fee_txid, &fee_addr, 0);
+    let cust_lbtc_utxo = cap(&cust_w, &cust_lbtc_txid, &cust_lbtc_addr, 0);
+    let cust_asset_utxo = cap(&cust_w, &cust_asset_txid, &cust_asset_addr, 1);
+    let cust_lbtc_val = cust_lbtc_utxo.value();
+    let cust_asset_val = cust_asset_utxo.value();
+
+    // Migrate account-for-account: the customer's full L-BTC + full asset go to
+    // the new-fed customer address; the old fee account drains its L-BTC to the
+    // new fee address (paying the mining fee).
+    let inputs = vec![
+        (fee_utxo, &fee_w),
+        (cust_lbtc_utxo, &cust_w),
+        (cust_asset_utxo, &cust_w),
+    ];
+    let recipients = vec![
+        (new_cust_dest.clone(), cust_lbtc_val, policy),
+        (new_cust_dest.clone(), cust_asset_val, asset),
+    ];
+    let blinded =
+        build_migration_pset(&fee_w, &inputs, &recipients, &new_fee_dest, 1000.0).unwrap();
+
+    // Each account's 2-of-3 signs (distinct feds → a signer only signs its own
+    // inputs), then finalize + broadcast.
+    let mut pset = blinded.into_pset();
+    for s in fee_sgn.iter().take(2).chain(cust_sgn.iter().take(2)) {
+        s.sign_pset(&mut pset).unwrap();
+    }
+    finalize_p2wsh_pset(&mut pset).unwrap();
+    let tx = pset.extract_tx().unwrap();
+    let raw_hex = elements::encode::serialize_hex(&tx);
+
+    let txid = call(&rpc, "sendrawtransaction", &[json!(raw_hex)]);
+    let txid = txid.as_str().expect("broadcast txid").to_string();
+    // Confirm in a block. The migration tx is federation-signed (not a wallet
+    // tx), so query it by block hash rather than gettransaction.
+    let mine_addr = call(&rpc, "getnewaddress", &[]);
+    let blocks = call(&rpc, "generatetoaddress", &[json!(1), mine_addr]);
+    let blockhash = blocks[0].as_str().expect("block hash");
+    let mined = call(
+        &rpc,
+        "getrawtransaction",
+        &[json!(txid), json!(true), json!(blockhash)],
+    );
+    assert_eq!(
+        mined["txid"].as_str(),
+        Some(txid.as_str()),
+        "migration tx {txid} mined in block"
+    );
+
+    // The NEW federation receives the customer's full L-BTC + full asset.
+    let spk = new_cust_dest.script_pubkey();
+    let mut got_lbtc = 0u64;
+    let mut got_asset = 0u64;
+    for o in tx.output.iter().filter(|o| o.script_pubkey == spk) {
+        let s = newc_w.unblind(o).unwrap();
+        if s.asset == policy {
+            got_lbtc = s.value;
+        } else if s.asset == asset {
+            got_asset = s.value;
+        }
+    }
+    assert_eq!(got_asset, cust_asset_val, "customer asset migrated in full");
+    assert_eq!(got_lbtc, cust_lbtc_val, "customer L-BTC migrated in full");
+    eprintln!(
+        "ASSET MIGRATION CONFIRMED: {txid} — new fed got {got_lbtc} sat L-BTC + {got_asset} asset units"
+    );
 }
