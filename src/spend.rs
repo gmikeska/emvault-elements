@@ -53,6 +53,40 @@ pub fn build_spend_pset(
     finish_blinded(pset, &enrich)
 }
 
+/// Like [`build_spend_pset`] but pays `amount` of an arbitrary `asset` (not just
+/// L-BTC) to `recipient`.
+///
+/// The mining fee on Liquid is always paid in L-BTC, so `utxos` must include
+/// enough L-BTC alongside the `asset` UTXOs. LWK selects the `asset` to cover
+/// the recipient and L-BTC to cover the fee, returning `asset` change and L-BTC
+/// change to `wollet`'s internal chain. Inputs are enriched with the multisig
+/// `witness_script` + `bip32_derivation` exactly as in [`build_spend_pset`].
+///
+/// # Errors
+///
+/// Same as [`build_spend_pset`] (e.g. [`SpendError::Build`] if the provided
+/// UTXOs don't cover `amount` of `asset` plus the L-BTC fee).
+pub fn build_asset_spend_pset(
+    wollet: &ElementsWollet,
+    utxos: &[CapturedUtxo],
+    recipient: &Address,
+    asset: elements::AssetId,
+    amount: u64,
+    fee_rate_sat_per_kvb: f32,
+) -> Result<BlindedPset, SpendError> {
+    let singles = singles_of(wollet)?;
+    let (external, enrich) = prepare_inputs(utxos, &singles)?;
+    let pset = TxBuilder::new(wollet.lwk_network())
+        .add_external_utxos(external)
+        .map_err(|e| SpendError::Build(e.to_string()))?
+        .add_recipient(recipient, amount, asset)
+        .map_err(|e| SpendError::Build(e.to_string()))?
+        .fee_rate(Some(fee_rate_sat_per_kvb))
+        .finish(wollet.inner())
+        .map_err(|e| SpendError::Build(e.to_string()))?;
+    finish_blinded(pset, &enrich)
+}
+
 /// Like [`build_spend_pset`] but **sweeps** all provided UTXOs to `recipient`
 /// (drains L-BTC; no change output). Used for consolidation / migration sweeps.
 ///
@@ -363,6 +397,37 @@ mod tests {
         u
     }
 
+    fn explicit_txout_asset(spk: Script, value: u64, asset: AssetId) -> TxOut {
+        TxOut {
+            asset: Asset::Explicit(asset),
+            value: Value::Explicit(value),
+            nonce: Nonce::Null,
+            script_pubkey: spk,
+            witness: TxOutWitness::default(),
+        }
+    }
+
+    /// A `CapturedUtxo` funding `wollet`'s address `index` with `value` units of
+    /// `asset` (used to test non-L-BTC spends).
+    fn funding_asset_utxo(
+        wollet: &ElementsWollet,
+        index: u32,
+        value: u64,
+        txid_seed: u8,
+        asset: AssetId,
+    ) -> CapturedUtxo {
+        let addr = wollet.address(lwk_wollet::Chain::External, index).unwrap();
+        let mut u = captured_lbtc(WalletId::from_bytes([1; 16]), index, value, txid_seed);
+        u.txout = explicit_txout_asset(addr.script_pubkey(), value, asset);
+        u.secrets = TxOutSecrets::new(
+            asset,
+            AssetBlindingFactor::zero(),
+            value,
+            ValueBlindingFactor::zero(),
+        );
+        u
+    }
+
     /// Multi-account, fee-account-pays migration PSET: customers receive exact
     /// amounts, the fee account absorbs the mining fee via the drain, and each
     /// account signs only its own inputs.
@@ -624,6 +689,70 @@ mod tests {
             pset.outputs().iter().any(|o| o.value_rangeproof.is_some()),
             "LWK blinded the outputs"
         );
+    }
+
+    #[test]
+    fn asset_spend_pays_asset_and_lbtc_fee() {
+        let (fed, wollet, signers) = federation_and_wollet([1, 2, 3], 0xaa);
+        let (_f2, w2, _s2) = federation_and_wollet([7, 8, 9], 0xdd);
+        let recipient = w2.address(lwk_wollet::Chain::External, 0).unwrap();
+
+        // A custom (non-policy) asset, funded alongside L-BTC for the fee.
+        let asset = AssetId::from_byte_array([0x11; 32]);
+        let asset_utxo = funding_asset_utxo(&wollet, 0, 100_000, 1, asset);
+        let lbtc_utxo = funding_utxo(&wollet, 1, 100_000, 2);
+
+        let blinded = build_asset_spend_pset(
+            &wollet,
+            &[asset_utxo, lbtc_utxo],
+            &recipient,
+            asset,
+            40_000,
+            100.0,
+        )
+        .unwrap();
+
+        // Both our inputs enriched with the multisig metadata.
+        {
+            let pset = blinded.as_pset();
+            assert_eq!(pset.inputs().len(), 2, "asset input + L-BTC fee input");
+            for inp in pset.inputs() {
+                assert!(inp.witness_script.is_some());
+                assert_eq!(inp.bip32_derivation.len(), 3);
+            }
+        }
+
+        // Recipient receives exactly 40_000 of the custom asset (not L-BTC),
+        // and a non-zero L-BTC fee output exists.
+        let tx = blinded.as_pset().extract_tx().unwrap();
+        let spk = recipient.script_pubkey();
+        let rec_out = tx
+            .output
+            .iter()
+            .find(|o| o.script_pubkey == spk)
+            .expect("recipient output present");
+        let secrets = w2.unblind(rec_out).unwrap();
+        assert_eq!(secrets.asset, asset, "recipient got the custom asset");
+        assert_eq!(secrets.value, 40_000, "recipient got the exact amount");
+        let fee_sat = tx
+            .output
+            .iter()
+            .find(|o| o.script_pubkey.is_empty())
+            .and_then(|o| o.value.explicit())
+            .expect("explicit L-BTC fee output");
+        assert!(fee_sat > 0, "non-zero L-BTC fee");
+
+        // Full 2-of-3 sign + finalize round-trips.
+        let mut coordinator = ElementsSigningCoordinator::new(&fed, blinded).unwrap();
+        coordinator
+            .sign_with(&signers[0], &signers[0].id())
+            .unwrap();
+        coordinator
+            .sign_with(&signers[1], &signers[1].id())
+            .unwrap();
+        assert!(coordinator.is_complete(), "2-of-3 threshold met");
+        let finalized = coordinator.finalize().unwrap();
+        assert_eq!(finalized.transaction().input.len(), 2);
     }
 
     #[test]
