@@ -756,6 +756,51 @@ mod tests {
     }
 
     #[test]
+    fn asset_spend_full_balance_drains_asset() {
+        let (fed, wollet, signers) = federation_and_wollet([1, 2, 3], 0xaa);
+        let (_f2, w2, _s2) = federation_and_wollet([7, 8, 9], 0xdd);
+        let recipient = w2.address(lwk_wollet::Chain::External, 0).unwrap();
+
+        let asset = AssetId::from_byte_array([0x11; 32]);
+        let asset_utxo = funding_asset_utxo(&wollet, 0, 100_000, 1, asset);
+        let lbtc_utxo = funding_utxo(&wollet, 1, 100_000, 2);
+
+        // "Max": send the ENTIRE asset balance — the fee comes from L-BTC, so
+        // the recipient receives the full amount and no asset change is created.
+        let blinded = build_asset_spend_pset(
+            &wollet,
+            &[asset_utxo, lbtc_utxo],
+            &recipient,
+            asset,
+            100_000,
+            100.0,
+        )
+        .unwrap();
+        let tx = blinded.as_pset().extract_tx().unwrap();
+        let rec = tx
+            .output
+            .iter()
+            .find(|o| o.script_pubkey == recipient.script_pubkey())
+            .expect("recipient output");
+        let secrets = w2.unblind(rec).unwrap();
+        assert_eq!(secrets.asset, asset);
+        assert_eq!(
+            secrets.value, 100_000,
+            "recipient received the full asset balance (drain, no change)"
+        );
+
+        let mut coordinator = ElementsSigningCoordinator::new(&fed, blinded).unwrap();
+        coordinator
+            .sign_with(&signers[0], &signers[0].id())
+            .unwrap();
+        coordinator
+            .sign_with(&signers[1], &signers[1].id())
+            .unwrap();
+        assert!(coordinator.is_complete());
+        coordinator.finalize().unwrap();
+    }
+
+    #[test]
     fn full_round_trip_sign_and_finalize() {
         let (fed, wollet, signers) = federation_and_wollet([1, 2, 3], 0xaa);
         let recipient = {
