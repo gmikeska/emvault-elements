@@ -242,3 +242,152 @@ fn asset_receive_and_spend_live() {
     );
     eprintln!("SPEND CONFIRMED: {txid} ({confs} conf) — asset {asset_hex}");
 }
+
+/// Full-asset **Max**: fund a fresh federation, then drain its *entire* asset
+/// balance to a node address (the L-BTC fee is paid separately, so nothing is
+/// subtracted from the asset). Verifies on-chain that the node's asset balance
+/// returns in full — i.e. no asset change was created.
+#[test]
+#[allow(clippy::too_many_lines)]
+fn asset_max_drain_live() {
+    if skip() {
+        return;
+    }
+    let rpc = wallet_client();
+    let net = ElementsNetwork::ElementsRegtest;
+
+    // Issue 500 units + confirm.
+    let issue = call(&rpc, "issueasset", &[json!(500), json!(0)]);
+    let asset_hex = issue["asset"].as_str().expect("asset id").to_string();
+    let asset = elements::AssetId::from_str(&asset_hex).unwrap();
+    mine(&rpc);
+
+    // Node's real regtest params.
+    let genesis_hex = call(&rpc, "getblockhash", &[json!(0)]);
+    let genesis = elements::BlockHash::from_str(genesis_hex.as_str().unwrap()).unwrap();
+    let side = call(&rpc, "getsidechaininfo", &[]);
+    let policy =
+        elements::AssetId::from_str(side["pegged_asset"].as_str().expect("pegged_asset")).unwrap();
+    let lwk_net = ElementsNetwork::custom_regtest(policy, genesis);
+
+    // Fresh 2-of-3 federation (distinct seeds → distinct wallet).
+    let signers: Vec<SoftwareSigner> = [11u8, 12, 13]
+        .map(|s| SoftwareSigner::new_with_lwk(s, lwk_net))
+        .to_vec();
+    let mbk = [0x77u8; 32];
+    let mut builder = CtDescriptorBuilder::new(2, &mbk)
+        .unwrap()
+        .key_mode(CtKeyMode::Ranged);
+    for s in &signers {
+        builder.add_signer(s as &dyn Signer).unwrap();
+    }
+    let desc = builder.build().unwrap();
+    let handle = ElementsWalletHandle::new(desc, mbk);
+    let wollet = ElementsWollet::from_handle_with_lwk(&handle, net, lwk_net).unwrap();
+    let asset_addr = wollet.address(lwk_wollet::Chain::External, 0).unwrap();
+    let fee_addr = wollet.address(lwk_wollet::Chain::External, 1).unwrap();
+
+    // Fund: 250 units of the asset + 1.0 L-BTC, then confirm.
+    let asset_txid = call(
+        &rpc,
+        "sendtoaddress",
+        &[
+            json!(asset_addr.to_string()),
+            json!(250),
+            json!(""),
+            json!(""),
+            json!(false),
+            json!(false),
+            json!(1),
+            json!("unset"),
+            json!(false),
+            json!(asset_hex),
+        ],
+    )
+    .as_str()
+    .unwrap()
+    .to_string();
+    let lbtc_txid = call(
+        &rpc,
+        "sendtoaddress",
+        &[json!(fee_addr.to_string()), json!(1.0)],
+    )
+    .as_str()
+    .unwrap()
+    .to_string();
+    mine(&rpc);
+
+    // Node's asset balance now (after sending 250 to the federation).
+    let node_asset = |r: &Client| -> f64 {
+        call(r, "getbalances", &[])["mine"]["trusted"][asset_hex.as_str()]
+            .as_f64()
+            .unwrap_or(0.0)
+    };
+    let before = node_asset(&rpc);
+
+    // Capture both federation UTXOs.
+    let wid = WalletId::from_bytes([9; 16]);
+    let (a_vout, a_txout) = find_output(&rpc, &asset_txid, &asset_addr.script_pubkey());
+    let (f_vout, f_txout) = find_output(&rpc, &lbtc_txid, &fee_addr.script_pubkey());
+    let asset_utxo = captured_from_output(
+        &wollet,
+        elements::Txid::from_str(&asset_txid).unwrap(),
+        a_vout,
+        &a_txout,
+        wid,
+        0,
+    )
+    .expect("capture asset utxo");
+    let fee_utxo = captured_from_output(
+        &wollet,
+        elements::Txid::from_str(&lbtc_txid).unwrap(),
+        f_vout,
+        &f_txout,
+        wid,
+        1,
+    )
+    .expect("capture fee utxo");
+
+    // MAX: spend the ENTIRE asset balance back to a node address.
+    let drain = asset_utxo.value();
+    let recipient_str = call(&rpc, "getnewaddress", &[])
+        .as_str()
+        .unwrap()
+        .to_string();
+    let recipient = elements::Address::from_str(&recipient_str).unwrap();
+    let blinded = build_asset_spend_pset(
+        &wollet,
+        &[asset_utxo, fee_utxo],
+        &recipient,
+        asset,
+        drain,
+        1000.0,
+    )
+    .expect("build asset drain pset");
+
+    let mut pset = blinded.into_pset();
+    for s in signers.iter().take(2) {
+        s.sign_pset(&mut pset).expect("sign");
+    }
+    finalize_p2wsh_pset(&mut pset).expect("finalize");
+    let tx = pset.extract_tx().expect("extract");
+    let raw_hex = elements::encode::serialize_hex(&tx);
+
+    let txid = call(&rpc, "sendrawtransaction", &[json!(raw_hex)]);
+    let txid = txid.as_str().expect("broadcast txid").to_string();
+    mine(&rpc);
+    let got = call(&rpc, "gettransaction", &[json!(txid.clone())]);
+    assert!(
+        got["confirmations"].as_i64().unwrap_or(0) >= 1,
+        "drain tx {txid} should be confirmed"
+    );
+
+    // The node's asset balance returned in full → the whole 250 units came back
+    // (no asset change stranded in the federation).
+    let after = node_asset(&rpc);
+    assert!(
+        (after - before - 250.0).abs() < 1e-8,
+        "node asset balance should rise by the full 250 units: before={before} after={after}"
+    );
+    eprintln!("MAX DRAIN CONFIRMED: {txid} — node asset {before} → {after} (+250)");
+}
