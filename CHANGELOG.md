@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 > Entries for 0.5.0 and earlier were reconstructed from git history.
 
+## [0.9.0] - 2026-08-21
+
+### Added
+- `build_asset_spend_pset` — build a PSET spending a **non-L-BTC Liquid asset**
+  to a recipient (L-BTC still pays the network fee), with an offline unit test
+  and a gated live-regtest e2e.
+
+### Changed
+- **BREAKING:** federation migration is now **asset-aware**. The sweep planner
+  emits one recipient per held asset and `build_migration_pset` (and the
+  per-asset sweep API) take `(Address, u64, AssetId)` recipients, so a migration
+  carries L-BTC **and** every issued asset to the successor in a single
+  transaction. Callers building migration sweeps must now supply the asset id.
+
+### Tested
+- Live regtest e2e: asset send, full-balance asset drain (asset "Max", no change
+  output), and single- + multi-customer asset migration with per-customer amount
+  preservation.
+
 ## [0.8.0] - 2026-08-16
 
 ### Changed
