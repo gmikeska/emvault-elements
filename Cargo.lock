@@ -711,7 +711,7 @@ dependencies = [
 
 [[package]]
 name = "emvault-core"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "bdk_bitcoind_rpc",
  "bdk_wallet",
@@ -730,7 +730,7 @@ dependencies = [
 
 [[package]]
 name = "emvault-elements"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "bitcoin",
  "bitcoincore-rpc",
